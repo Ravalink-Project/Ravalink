@@ -875,7 +875,7 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
 
 
 #[cfg(test)]
-mod routeplanner_tests {
+mod server_api_tests {
     use super::*;
     use axum::http::HeaderValue;
 
@@ -893,10 +893,7 @@ mod routeplanner_tests {
 
     fn authorized_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            HeaderValue::from_static("test-password"),
-        );
+        headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
     }
 
@@ -940,8 +937,7 @@ mod routeplanner_tests {
 
     #[tokio::test]
     async fn routeplanner_free_operations_report_disabled_planner() {
-        let address =
-            routeplanner_free_address(authorized_headers(), State(state())).await;
+        let address = routeplanner_free_address(authorized_headers(), State(state())).await;
         let all = routeplanner_free_all(authorized_headers(), State(state())).await;
         assert_eq!(address.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(all.status(), StatusCode::INTERNAL_SERVER_ERROR);
