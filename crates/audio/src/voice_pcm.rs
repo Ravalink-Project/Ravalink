@@ -12,8 +12,7 @@ pub const VOICE_CHANNELS: u16 = 2;
 pub const VOICE_FRAME_DURATION_MS: u32 = 20;
 pub const VOICE_FRAME_SAMPLES_PER_CHANNEL: usize =
     (VOICE_SAMPLE_RATE as usize * VOICE_FRAME_DURATION_MS as usize) / 1_000;
-const VOICE_FRAME_SAMPLE_COUNT: usize =
-    VOICE_FRAME_SAMPLES_PER_CHANNEL * VOICE_CHANNELS as usize;
+const VOICE_FRAME_SAMPLE_COUNT: usize = VOICE_FRAME_SAMPLES_PER_CHANNEL * VOICE_CHANNELS as usize;
 
 /// Convert an interleaved PCM frame to stereo 48 kHz floating-point PCM.
 ///
@@ -21,10 +20,14 @@ const VOICE_FRAME_SAMPLE_COUNT: usize =
 /// its first two channels; callers can apply the channel-mix filter beforehand.
 pub fn normalize_for_voice(frame: &PcmFrame) -> Result<PcmFrame, AudioError> {
     if frame.channels == 0 {
-        return Err(AudioError::invalid("PCM frame must have at least one channel"));
+        return Err(AudioError::invalid(
+            "PCM frame must have at least one channel",
+        ));
     }
     if frame.sample_rate == 0 {
-        return Err(AudioError::invalid("PCM sample rate must be greater than zero"));
+        return Err(AudioError::invalid(
+            "PCM sample rate must be greater than zero",
+        ));
     }
     let input_channels = usize::from(frame.channels);
     if !frame.samples.len().is_multiple_of(input_channels) {
@@ -100,10 +103,7 @@ impl VoicePcmPacketizer {
         if self.samples.len() < VOICE_FRAME_SAMPLE_COUNT {
             return None;
         }
-        let samples = self
-            .samples
-            .drain(..VOICE_FRAME_SAMPLE_COUNT)
-            .collect();
+        let samples = self.samples.drain(..VOICE_FRAME_SAMPLE_COUNT).collect();
         Some(PcmFrame {
             samples,
             channels: VOICE_CHANNELS,
