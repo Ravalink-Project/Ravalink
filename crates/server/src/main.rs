@@ -14,7 +14,7 @@ use ravalink_audio::{AudioTrack, HttpSourceManager, PcmFrame};
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, ServerInfo, SessionInfo,
-    SessionUpdate, Track, decode_track,
+    SessionUpdate, StatsMessage, Track, WebSocketMessage, decode_track,
 };
 use serde::Deserialize;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -223,7 +223,10 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
+    Json(collect_stats(&state).await).into_response()
+}
 
+async fn collect_stats(state: &AppState) -> NodeStats {
     let mut system = System::new_all();
     system.refresh_all();
     system.refresh_cpu_usage();
@@ -241,7 +244,7 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
         .map(|process| f64::from(process.cpu_usage()) / 100.0)
         .unwrap_or(0.0);
 
-    let value = NodeStats {
+    NodeStats {
         frame_stats: None,
         players: state.players.len().await,
         playing_players: state.audio_players.playing_len().await,
@@ -257,8 +260,7 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
             system_load,
             lavalink_load: process_load,
         },
-    };
-    Json(value).into_response()
+    }
 }
 
 async fn routeplanner_status(headers: HeaderMap, State(state): State<AppState>) -> Response {
@@ -842,18 +844,40 @@ async fn handle_socket(
         return;
     }
 
-    while let Some(message) = socket.recv().await {
-        match message {
-            Ok(Message::Ping(payload)) => {
-                if socket.send(Message::Pong(payload)).await.is_err() {
+    let mut stats_interval = tokio::time::interval(Duration::from_secs(60));
+    stats_interval.tick().await;
+    loop {
+        tokio::select! {
+            message = socket.recv() => {
+                match message {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    Some(Ok(Message::Text(_))) => {
+                        warn!("Ignoring client WebSocket text message; Lavalink v4 commands use REST");
+                    }
+                    _ => {}
+                }
+            }
+            _ = stats_interval.tick() => {
+                let node_stats = collect_stats(&state).await;
+                let message = WebSocketMessage::Stats(StatsMessage {
+                    players: node_stats.players,
+                    playing_players: node_stats.playing_players,
+                    uptime: node_stats.uptime,
+                    memory: node_stats.memory,
+                    cpu: node_stats.cpu,
+                    frame_stats: node_stats.frame_stats,
+                });
+                let payload = serde_json::to_string(&message)
+                    .expect("WebSocket stats message serializes to JSON");
+                if socket.send(Message::Text(payload.into())).await.is_err() {
                     break;
                 }
             }
-            Ok(Message::Close(_)) | Err(_) => break,
-            Ok(Message::Text(_)) => {
-                warn!("Ignoring client WebSocket text message; Lavalink v4 commands use REST");
-            }
-            _ => {}
         }
     }
 
