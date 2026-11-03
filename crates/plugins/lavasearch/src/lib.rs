@@ -193,12 +193,18 @@ impl LavaSearchPlugin {
             .query(&[("q", query)])
             .send()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("Deezer request failed: {error}")))?
+            .map_err(|error| {
+                PluginError::new("lavasearch", format!("Deezer request failed: {error}"))
+            })?
             .error_for_status()
-            .map_err(|error| PluginError::new("lavasearch", format!("Deezer returned an error: {error}")))?
+            .map_err(|error| {
+                PluginError::new("lavasearch", format!("Deezer returned an error: {error}"))
+            })?
             .json()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("invalid Deezer response: {error}")))
+            .map_err(|error| {
+                PluginError::new("lavasearch", format!("invalid Deezer response: {error}"))
+            })
     }
 
     async fn apple_search(&self, query: &str, entity: &str) -> Result<Value, PluginError> {
@@ -207,12 +213,24 @@ impl LavaSearchPlugin {
             .query(&[("term", query), ("entity", entity), ("limit", "5")])
             .send()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("Apple Music request failed: {error}")))?
+            .map_err(|error| {
+                PluginError::new("lavasearch", format!("Apple Music request failed: {error}"))
+            })?
             .error_for_status()
-            .map_err(|error| PluginError::new("lavasearch", format!("Apple Music returned an error: {error}")))?
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasearch",
+                    format!("Apple Music returned an error: {error}"),
+                )
+            })?
             .json()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("invalid Apple Music response: {error}")))
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasearch",
+                    format!("invalid Apple Music response: {error}"),
+                )
+            })
     }
 
     async fn spotify_token(&self) -> Result<String, PluginError> {
@@ -242,12 +260,27 @@ impl LavaSearchPlugin {
             .form(&[("grant_type", "client_credentials")])
             .send()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("Spotify token request failed: {error}")))?
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasearch",
+                    format!("Spotify token request failed: {error}"),
+                )
+            })?
             .error_for_status()
-            .map_err(|error| PluginError::new("lavasearch", format!("Spotify authentication failed: {error}")))?
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasearch",
+                    format!("Spotify authentication failed: {error}"),
+                )
+            })?
             .json()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("invalid Spotify token response: {error}")))?;
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasearch",
+                    format!("invalid Spotify token response: {error}"),
+                )
+            })?;
         let token = response
             .get("access_token")
             .and_then(Value::as_str)
@@ -274,12 +307,21 @@ impl LavaSearchPlugin {
             .query(&[("q", query), ("type", kind), ("limit", "10")])
             .send()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("Spotify search failed: {error}")))?
+            .map_err(|error| {
+                PluginError::new("lavasearch", format!("Spotify search failed: {error}"))
+            })?
             .error_for_status()
-            .map_err(|error| PluginError::new("lavasearch", format!("Spotify returned an error: {error}")))?
+            .map_err(|error| {
+                PluginError::new("lavasearch", format!("Spotify returned an error: {error}"))
+            })?
             .json()
             .await
-            .map_err(|error| PluginError::new("lavasearch", format!("invalid Spotify search response: {error}")))
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasearch",
+                    format!("invalid Spotify search response: {error}"),
+                )
+            })
     }
 
     async fn spotify_track_links(&self, query: &str) -> Result<Vec<String>, PluginError> {
@@ -353,10 +395,7 @@ impl RavaLinkPlugin for LavaSearchPlugin {
         Self::parse_request(identifier).is_some()
     }
 
-    async fn load_tracks(
-        &self,
-        identifier: &str,
-    ) -> Result<Option<PluginLoadResult>, PluginError> {
+    async fn load_tracks(&self, identifier: &str) -> Result<Option<PluginLoadResult>, PluginError> {
         let Some(request) = Self::parse_request(identifier) else {
             return Ok(None);
         };
