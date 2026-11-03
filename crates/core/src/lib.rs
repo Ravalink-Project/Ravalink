@@ -344,10 +344,13 @@ mod player_store_tests {
     }
 }
 
+type PlayerKey = (String, String);
+type SharedNativePlayer = Arc<tokio::sync::Mutex<NativePlayer>>;
+
 /// Native audio players keyed by Lavalink session and Discord guild.
 #[derive(Clone, Default)]
 pub struct AudioPlayerStore {
-    players: Arc<RwLock<HashMap<(String, String), Arc<tokio::sync::Mutex<NativePlayer>>>>>,
+    players: Arc<RwLock<HashMap<PlayerKey, SharedNativePlayer>>>,
 }
 
 impl AudioPlayerStore {
@@ -355,7 +358,7 @@ impl AudioPlayerStore {
         &self,
         session_id: &str,
         guild_id: &str,
-    ) -> Arc<tokio::sync::Mutex<NativePlayer>> {
+    ) -> SharedNativePlayer {
         let key = (session_id.to_owned(), guild_id.to_owned());
         let mut players = self.players.write().await;
         players
@@ -442,7 +445,7 @@ impl AudioPlayerStore {
         &self,
         session_id: &str,
         guild_id: &str,
-    ) -> Option<Arc<tokio::sync::Mutex<NativePlayer>>> {
+    ) -> Option<SharedNativePlayer> {
         self.players
             .read()
             .await
