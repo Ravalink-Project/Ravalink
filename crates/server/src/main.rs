@@ -10,11 +10,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use ravalink_audio::HttpSourceManager;
+use ravalink_audio::{AudioTrack, HttpSourceManager, PcmFrame};
 use ravalink_core::{AudioPlayerStore, PlayerStore, SessionStore};
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, ServerInfo, SessionInfo,
-    SessionUpdate, decode_track,
+    SessionUpdate, Track, decode_track,
 };
 use serde::Deserialize;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -363,10 +363,10 @@ async fn update_player(
         return Json(player).into_response();
     }
 
-    if has_track_request || fields.contains_key("voice") {
+    if fields.contains_key("voice") {
         return api_error(
             StatusCode::NOT_IMPLEMENTED,
-            "Track resolution and Discord voice transport are not implemented yet",
+            "Discord voice transport is not implemented yet",
             &path,
         );
     }
@@ -382,16 +382,47 @@ async fn update_player(
 
     let fields = fields.clone();
     let mut normalized_update = update;
-    if encoded_track_is_null {
+    if has_track_request {
+        let (track, frames) = match resolve_player_track(&state, &fields).await {
+            Ok(resolved) => resolved,
+            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
+        };
+        let audio_track = AudioTrack {
+            identifier: track.info.identifier.clone(),
+            title: track.info.title.clone(),
+            author: track.info.author.clone(),
+            duration_ms: u64::try_from(track.info.length).ok(),
+            is_stream: track.info.is_stream,
+        };
+        if let Err(error) = state
+            .audio_players
+            .load_decoded_track(&session_id, &guild_id, audio_track, frames)
+            .await
+        {
+            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+        }
         let object = normalized_update
             .as_object_mut()
             .expect("validated JSON object");
+        object.remove("identifier");
         object.remove("encodedTrack");
-        object.insert("track".to_owned(), serde_json::Value::Null);
-    }
-    if fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null {
+        object.insert(
+            "track".to_owned(),
+            serde_json::to_value(track).expect("Track serializes to JSON"),
+        );
+    } else if fields.get("track").is_some_and(serde_json::Value::is_null)
+        || encoded_track_is_null
+    {
         state.audio_players.stop(&session_id, &guild_id).await;
+        let object = normalized_update
+            .as_object_mut()
+            .expect("validated JSON object");
+        if encoded_track_is_null {
+            object.remove("encodedTrack");
+            object.insert("track".to_owned(), serde_json::Value::Null);
+        }
     }
+
     if let Some(volume) = fields.get("volume") {
         let Some(volume) = volume.as_u64().and_then(|value| u16::try_from(value).ok()) else {
             return api_error(
@@ -452,6 +483,74 @@ async fn update_player(
             .await,
     )
     .into_response()
+}
+
+async fn resolve_player_track(
+    state: &AppState,
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(Track, Vec<PcmFrame>), String> {
+    if let Some(identifier) = fields.get("identifier").and_then(serde_json::Value::as_str) {
+        let resolved = state
+            .http_sources
+            .resolve(identifier)
+            .await
+            .map_err(|error| error.message)?;
+        let frames = state
+            .http_sources
+            .take_frames(&resolved.track.encoded)
+            .map_err(|error| error.message)?
+            .ok_or_else(|| "decoded HTTP audio is no longer cached".to_owned())?;
+        return Ok((resolved.track, frames));
+    }
+
+    let encoded = fields
+        .get("encodedTrack")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            fields
+                .get("track")
+                .and_then(|track| track.get("encoded"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .ok_or_else(|| "track update must contain an encoded track".to_owned())?;
+    let mut track = decode_track(encoded).map_err(|error| error.message)?;
+    if let Some(user_data) = fields
+        .get("track")
+        .and_then(|value| value.get("userData"))
+    {
+        track.user_data = user_data.clone();
+    }
+
+    let frames = state
+        .http_sources
+        .take_frames(&track.encoded)
+        .map_err(|error| error.message)?;
+    if let Some(frames) = frames {
+        return Ok((track, frames));
+    }
+    if track.info.source_name != "http" {
+        return Err(format!(
+            "source manager '{}' is not available on this node",
+            track.info.source_name
+        ));
+    }
+    let uri = track
+        .info
+        .uri
+        .clone()
+        .ok_or_else(|| "encoded HTTP track has no source URI".to_owned())?;
+    let resolved = state
+        .http_sources
+        .resolve(&uri)
+        .await
+        .map_err(|error| error.message)?;
+    let frames = state
+        .http_sources
+        .take_frames(&resolved.track.encoded)
+        .map_err(|error| error.message)?
+        .ok_or_else(|| "decoded HTTP audio is no longer cached".to_owned())?;
+    track = resolved.track;
+    Ok((track, frames))
 }
 
 async fn decode_track_endpoint(
