@@ -362,6 +362,26 @@ async fn update_player(
         );
     };
 
+    for (field, valid) in [
+        ("identifier", |value: &serde_json::Value| value.is_null() || value.is_string()),
+        ("encodedTrack", |value: &serde_json::Value| value.is_null() || value.is_string()),
+        ("track", |value: &serde_json::Value| value.is_null() || value.is_object()),
+        ("paused", |value: &serde_json::Value| value.is_boolean()),
+        ("position", |value: &serde_json::Value| value.as_u64().is_some()),
+        ("volume", |value: &serde_json::Value| value
+            .as_u64()
+            .is_some_and(|volume| volume <= 1_000)),
+        ("filters", |value: &serde_json::Value| value.is_object()),
+    ] {
+        if fields.get(field).is_some_and(|value| !valid(value)) {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                &format!("Invalid value for player field '{field}'"),
+                &path,
+            );
+        }
+    }
+
     let has_identifier = fields
         .get("identifier")
         .is_some_and(|value| !value.is_null());
