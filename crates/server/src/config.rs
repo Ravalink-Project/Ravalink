@@ -135,9 +135,7 @@ impl Config {
                 "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
             })?;
         }
-        if config.server.player_update_interval == 0 {
-            return Err("server.player_update_interval must be greater than zero".to_owned());
-        }
+        validate_player_update_interval(config.server.player_update_interval)?;
         validate_metrics_endpoint(
             config.metrics.prometheus_enabled,
             &config.metrics.prometheus_endpoint,
@@ -147,6 +145,13 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+fn validate_player_update_interval(interval: u64) -> Result<(), String> {
+    if interval == 0 {
+        return Err("server.player_update_interval must be greater than zero".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_metrics_endpoint(enabled: bool, endpoint: &str) -> Result<(), String> {
@@ -185,14 +190,8 @@ mod tests {
 
     #[test]
     fn player_update_interval_must_be_nonzero() {
-        let config: Config = toml::from_str(
-            r#"
-                [server]
-                player_update_interval = 0
-            "#,
-        )
-        .unwrap();
-        assert_eq!(config.server.player_update_interval, 0);
+        assert!(validate_player_update_interval(5).is_ok());
+        assert!(validate_player_update_interval(0).is_err());
     }
 
     #[test]
