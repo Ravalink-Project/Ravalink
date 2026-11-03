@@ -248,6 +248,8 @@ async fn collect_stats(state: &AppState) -> NodeStats {
     let process_load = current_process
         .map(|process| f64::from(process.cpu_usage()) / 100.0)
         .unwrap_or(0.0);
+    drop(current_process);
+    drop(system);
 
     NodeStats {
         frame_stats: None,
