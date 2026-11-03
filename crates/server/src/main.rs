@@ -110,14 +110,14 @@ async fn main() {
             "/v4/sessions/{session_id}/players/{guild_id}",
             get(get_player).patch(update_player).delete(delete_player),
         )
-        .route("/v4/websocket", get(websocket))
-        .with_state(state);
+        .route("/v4/websocket", get(websocket));
 
     let app = if config.metrics.prometheus_enabled {
         app.route(&config.metrics.prometheus_endpoint, get(metrics_endpoint))
     } else {
         app
     };
+    let app = app.with_state(state);
 
     let socket = format!("{address}:{port}");
     let listener = TcpListener::bind(&socket)
