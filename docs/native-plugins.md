@@ -5,7 +5,7 @@ server. They are separate crates and share the `ravalink-plugin-api` contract.
 
 | Crate | Lavalink equivalent | Current implementation |
 |---|---|---|
-| `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, audio-format resolution, video search and playlist expansion |
+| `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, AAC audio-format selection, timestamped starts, video search and playlist expansion |
 | `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer track metadata with YouTube audio matching |
 | `ravalink-plugin-lavasearch` | LavaSearch | Track, album, artist and playlist search syntax |
 
@@ -17,7 +17,8 @@ distributed independently. They do not load Java `.jar` files and do not require
 The YouTube plugin uses an Invidious-compatible API. By default it connects to
 `https://inv.nadeko.net`; override this with `RAVALINK_YOUTUBE_API_BASE` if needed.
 It resolves video metadata and an audio stream URL, expands playlists, and supports
-`ytsearch:` and `ytmsearch:`.
+`ytsearch:` and `ytmsearch:`. When an AAC audio format is available it is preferred
+over Opus/WebM so the current Symphonia decoder can process the stream.
 
 ## LavaSrc
 

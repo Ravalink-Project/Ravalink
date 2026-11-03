@@ -621,6 +621,14 @@ async fn update_player(
         {
             return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
         }
+        if track.info.position > 0
+            && let Err(error) = state
+                .audio_players
+                .seek(&session_id, &guild_id, track.info.position)
+                .await
+        {
+            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+        }
         let object = normalized_update
             .as_object_mut()
             .expect("validated JSON object");

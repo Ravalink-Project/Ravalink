@@ -356,6 +356,19 @@ mod tests {
     }
 
     #[test]
+    fn native_music_provider_sources_round_trip_without_extra_payloads() {
+        for source_name in ["spotify", "applemusic", "deezer"] {
+            let mut track = sample_track();
+            track.info.source_name = source_name.to_owned();
+            track.encoded = encode_track(&track).unwrap();
+
+            let decoded = decode_track(&track.encoded).unwrap();
+            assert_eq!(decoded.info.source_name, source_name);
+            assert_eq!(decoded.info.uri, track.info.uri);
+        }
+    }
+
+    #[test]
     fn rejects_unknown_source_manager_payloads() {
         let mut track = sample_track();
         track.info.source_name = "unknown-source".into();

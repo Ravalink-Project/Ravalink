@@ -132,22 +132,7 @@ impl YouTubePlugin {
         let stream_url = data
             .get("adaptiveFormats")
             .and_then(Value::as_array)
-            .and_then(|formats| {
-                formats
-                    .iter()
-                    .filter(|format| {
-                        format
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .is_some_and(|mime| mime.starts_with("audio/"))
-                    })
-                    .max_by_key(|format| {
-                        format
-                            .get("bitrate")
-                            .and_then(Value::as_u64)
-                            .unwrap_or_default()
-                    })
-            })
+            .and_then(|formats| select_audio_format(formats))
             .and_then(|format| format.get("url").and_then(Value::as_str))
             .ok_or_else(|| PluginError::new("youtube", "no playable audio format was returned"))?;
         track.plugin_info = json!({
@@ -233,7 +218,12 @@ impl RavaLinkPlugin for YouTubePlugin {
         let parsed = Self::parse_identifier(identifier)
             .ok_or_else(|| PluginError::new("youtube", "invalid YouTube identifier"))?;
         if let Some(video_id) = parsed.video_id {
-            let track = self.load_video(&video_id).await?;
+            let mut track = self.load_video(&video_id).await?;
+            if let Some(start_seconds) = parsed.start_seconds {
+                track.info.position = start_seconds.saturating_mul(1_000);
+                track.encoded = encode_track(&track)
+                    .map_err(|error| PluginError::new("youtube", error.message))?;
+            }
             return Ok(Some(PluginLoadResult::new(
                 PluginLoadType::Track,
                 serde_json::to_value(track).expect("track serializes"),
@@ -244,6 +234,29 @@ impl RavaLinkPlugin for YouTubePlugin {
         }
         Ok(None)
     }
+}
+
+fn select_audio_format(formats: &[Value]) -> Option<&Value> {
+    formats
+        .iter()
+        .filter(|format| {
+            format
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|mime| mime.starts_with("audio/"))
+        })
+        .max_by_key(|format| {
+            let mime = format
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let prefer_aac = mime.starts_with("audio/mp4") || mime.contains("mp4a");
+            let bitrate = format
+                .get("bitrate")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            (prefer_aac, bitrate)
+        })
 }
 
 fn track_from_video(video: &Value) -> Result<Track, PluginError> {
@@ -319,7 +332,7 @@ impl ParsedUrl<'_> {
 fn parse_url(value: &str) -> Option<ParsedUrl<'_>> {
     let (_, rest) = value.split_once("://")?;
     let authority_end = rest
-        .find(|character| matches!(character, '/' | '?' | '#'))
+        .find(['/', '?', '#'])
         .unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     let host = authority
@@ -330,7 +343,7 @@ fn parse_url(value: &str) -> Option<ParsedUrl<'_>> {
         .to_ascii_lowercase();
     let suffix = &rest[authority_end..];
     let path_end = suffix
-        .find(|character| matches!(character, '?' | '#'))
+        .find(['?', '#'])
         .unwrap_or(suffix.len());
     let path = if path_end == 0 {
         "/"
@@ -409,6 +422,18 @@ mod tests {
     fn rejects_non_youtube_and_malformed_video_ids() {
         assert!(YouTubePlugin::parse_identifier("https://example.com/watch?v=123").is_none());
         assert!(YouTubePlugin::parse_identifier("https://youtube.com/watch?v=short").is_none());
+    }
+
+    #[test]
+    fn prefers_aac_audio_when_multiple_codecs_are_available() {
+        let formats = vec![
+            json!({"type": "audio/webm; codecs=opus", "bitrate": 160_000, "url": "https://cdn.test/opus"}),
+            json!({"type": "audio/mp4; codecs=mp4a.40.2", "bitrate": 96_000, "url": "https://cdn.test/aac"}),
+        ];
+        assert_eq!(
+            select_audio_format(&formats).and_then(|format| format.get("url")).and_then(Value::as_str),
+            Some("https://cdn.test/aac")
+        );
     }
 
     #[test]
