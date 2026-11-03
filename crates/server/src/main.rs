@@ -52,6 +52,8 @@ struct PlayerUpdateQuery {
     no_replace: bool,
 }
 
+type PlayerFieldValidator = (&'static str, fn(&serde_json::Value) -> bool);
+
 #[tokio::main]
 async fn main() {
     let config = config::Config::load().expect("failed to load RavaLink configuration");
@@ -362,7 +364,7 @@ async fn update_player(
         );
     };
 
-    let field_validators: [(&str, fn(&serde_json::Value) -> bool); 7] = [
+    let field_validators: [PlayerFieldValidator; 7] = [
         ("identifier", |value: &serde_json::Value| {
             value.is_null() || value.is_string()
         }),
