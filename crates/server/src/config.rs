@@ -128,6 +128,9 @@ impl Config {
                 "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
             })?;
         }
+        if config.audio.opus_encoding_quality > 10 {
+            return Err("audio.opus_encoding_quality must be between 0 and 10".to_owned());
+        }
         Ok(config)
     }
 }

@@ -503,6 +503,10 @@ impl Default for NativePlayer {
 
 impl NativePlayer {
     pub fn new(filters: Filters) -> Self {
+        Self::new_with_opus_complexity(filters, 10)
+    }
+
+    pub fn new_with_opus_complexity(filters: Filters, opus_complexity: u8) -> Self {
         Self {
             track: None,
             paused: false,
@@ -513,7 +517,7 @@ impl NativePlayer {
             processor: DspProcessor::new(filters),
             voice_packetizer: VoicePcmPacketizer::new(),
             opus_encoder: None,
-            opus_complexity: 10,
+            opus_complexity: opus_complexity.min(10),
         }
     }
 
@@ -849,6 +853,28 @@ mod tests {
         assert_eq!(voice_frame.channels, 2);
         assert_eq!(voice_frame.sample_rate, 48_000);
         assert!(player.next_voice_frame().unwrap().is_none());
+    }
+
+    #[test]
+    fn native_player_encodes_loaded_audio_as_opus_packets() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "short".into(),
+                    title: "Short".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(20),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.15; 960], 2), frame(vec![0.15; 960], 2)],
+            )
+            .unwrap();
+
+        let packet = player.next_opus_packet().unwrap().unwrap();
+        assert!(!packet.is_empty());
+        assert!(packet.len() <= 4_000);
+        assert!(player.next_opus_packet().unwrap().is_none());
     }
 
     #[test]

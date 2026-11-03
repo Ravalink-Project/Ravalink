@@ -70,7 +70,7 @@ async fn main() {
         password,
         sessions: SessionStore::default(),
         players: PlayerStore::default(),
-        audio_players: AudioPlayerStore::default(),
+        audio_players: AudioPlayerStore::new(config.audio.opus_encoding_quality),
         http_sources: HttpSourceManager::with_limits(
             config.audio.max_source_download_bytes,
             config.audio.max_decoded_cache_bytes,

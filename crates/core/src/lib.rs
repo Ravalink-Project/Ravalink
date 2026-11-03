@@ -348,18 +348,36 @@ type PlayerKey = (String, String);
 type SharedNativePlayer = Arc<tokio::sync::Mutex<NativePlayer>>;
 
 /// Native audio players keyed by Lavalink session and Discord guild.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AudioPlayerStore {
     players: Arc<RwLock<HashMap<PlayerKey, SharedNativePlayer>>>,
+    opus_complexity: u8,
+}
+
+impl Default for AudioPlayerStore {
+    fn default() -> Self {
+        Self::new(10)
+    }
 }
 
 impl AudioPlayerStore {
+    pub fn new(opus_complexity: u8) -> Self {
+        Self {
+            players: Arc::new(RwLock::new(HashMap::new())),
+            opus_complexity: opus_complexity.min(10),
+        }
+    }
     async fn get_or_create(&self, session_id: &str, guild_id: &str) -> SharedNativePlayer {
         let key = (session_id.to_owned(), guild_id.to_owned());
         let mut players = self.players.write().await;
         players
             .entry(key)
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(NativePlayer::default())))
+            .or_insert_with(|| {
+                Arc::new(tokio::sync::Mutex::new(NativePlayer::new_with_opus_complexity(
+                    Filters::default(),
+                    self.opus_complexity,
+                )))
+            })
             .clone()
     }
 
