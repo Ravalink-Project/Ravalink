@@ -125,27 +125,76 @@ impl Config {
         if let Ok(value) = env::var("RAVALINK_LOG_LEVEL") {
             config.logging.level = value;
         }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_BUFFER_DURATION_MS") {
+            config.audio.buffer_duration_ms = parse_env("RAVALINK_AUDIO_BUFFER_DURATION_MS", &value)?;
+        }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_FRAME_BUFFER_DURATION_MS") {
+            config.audio.frame_buffer_duration_ms =
+                parse_env("RAVALINK_AUDIO_FRAME_BUFFER_DURATION_MS", &value)?;
+        }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_OPUS_ENCODING_QUALITY") {
+            config.audio.opus_encoding_quality =
+                parse_env("RAVALINK_AUDIO_OPUS_ENCODING_QUALITY", &value)?;
+        }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_RESAMPLING_QUALITY") {
+            config.audio.resampling_quality = value;
+        }
         if let Ok(value) = env::var("RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES") {
-            config.audio.max_source_download_bytes = value.parse().map_err(|_| {
-                "RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES must be a valid usize".to_owned()
-            })?;
+            config.audio.max_source_download_bytes =
+                parse_env("RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES", &value)?;
         }
         if let Ok(value) = env::var("RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES") {
-            config.audio.max_decoded_cache_bytes = value.parse().map_err(|_| {
-                "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
-            })?;
+            config.audio.max_decoded_cache_bytes =
+                parse_env("RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES", &value)?;
         }
+        if let Ok(value) = env::var("RAVALINK_METRICS_PROMETHEUS_ENABLED") {
+            config.metrics.prometheus_enabled =
+                parse_env("RAVALINK_METRICS_PROMETHEUS_ENABLED", &value)?;
+        }
+        if let Ok(value) = env::var("RAVALINK_METRICS_PROMETHEUS_ENDPOINT") {
+            config.metrics.prometheus_endpoint = value;
+        }
+
         validate_player_update_interval(config.server.player_update_interval)?;
         validate_server_password(&config.server.password)?;
+        validate_audio_config(&config.audio)?;
         validate_metrics_endpoint(
             config.metrics.prometheus_enabled,
             &config.metrics.prometheus_endpoint,
         )?;
-        if config.audio.opus_encoding_quality > 10 {
-            return Err("audio.opus_encoding_quality must be between 0 and 10".to_owned());
-        }
         Ok(config)
     }
+}
+
+fn parse_env<T>(name: &str, value: &str) -> Result<T, String>
+where
+    T: std::str::FromStr,
+{
+    value
+        .parse()
+        .map_err(|_| format!("{name} has an invalid value: {value}"))
+}
+
+fn validate_audio_config(audio: &AudioConfig) -> Result<(), String> {
+    if audio.buffer_duration_ms == 0 {
+        return Err("audio.buffer_duration_ms must be greater than zero".to_owned());
+    }
+    if audio.frame_buffer_duration_ms == 0 {
+        return Err("audio.frame_buffer_duration_ms must be greater than zero".to_owned());
+    }
+    if audio.opus_encoding_quality > 10 {
+        return Err("audio.opus_encoding_quality must be between 0 and 10".to_owned());
+    }
+    if audio.max_source_download_bytes == 0 {
+        return Err("audio.max_source_download_bytes must be greater than zero".to_owned());
+    }
+    if audio.max_decoded_cache_bytes == 0 {
+        return Err("audio.max_decoded_cache_bytes must be greater than zero".to_owned());
+    }
+    if audio.resampling_quality.trim().is_empty() {
+        return Err("audio.resampling_quality must not be empty".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_server_password(password: &str) -> Result<(), String> {
@@ -197,6 +246,39 @@ mod tests {
 
         assert_eq!(config.audio.max_source_download_bytes, 16 * 1024 * 1024);
         assert_eq!(config.audio.max_decoded_cache_bytes, 32 * 1024 * 1024);
+    }
+
+    #[test]
+    fn audio_configuration_rejects_zero_limits_and_empty_quality() {
+        let mut audio = AudioConfig::default();
+        assert!(validate_audio_config(&audio).is_ok());
+
+        audio.buffer_duration_ms = 0;
+        assert!(validate_audio_config(&audio).is_err());
+        audio.buffer_duration_ms = 400;
+
+        audio.frame_buffer_duration_ms = 0;
+        assert!(validate_audio_config(&audio).is_err());
+        audio.frame_buffer_duration_ms = 5_000;
+
+        audio.max_source_download_bytes = 0;
+        assert!(validate_audio_config(&audio).is_err());
+        audio.max_source_download_bytes = 128 * 1024 * 1024;
+
+        audio.max_decoded_cache_bytes = 0;
+        assert!(validate_audio_config(&audio).is_err());
+        audio.max_decoded_cache_bytes = 256 * 1024 * 1024;
+
+        audio.resampling_quality.clear();
+        assert!(validate_audio_config(&audio).is_err());
+    }
+
+    #[test]
+    fn environment_values_are_parsed_without_silent_fallbacks() {
+        assert_eq!(parse_env::<u64>("INTERVAL", "25").unwrap(), 25);
+        assert!(parse_env::<u64>("INTERVAL", "fast").is_err());
+        assert!(parse_env::<bool>("ENABLED", "perhaps").is_err());
+        assert!(parse_env::<usize>("LIMIT", "-1").is_err());
     }
 
     #[test]
