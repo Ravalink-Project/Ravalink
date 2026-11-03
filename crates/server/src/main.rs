@@ -852,7 +852,7 @@ async fn handle_socket(
     let mut player_update_interval =
         tokio::time::interval(Duration::from_secs(state.player_update_interval));
     player_update_interval.tick().await;
-    loop {
+    'socket: loop {
         tokio::select! {
             message = socket.recv() => {
                 match message {
@@ -912,7 +912,7 @@ async fn handle_socket(
                     let payload = serde_json::to_string(&message)
                         .expect("WebSocket player update serializes to JSON");
                     if socket.send(Message::Text(payload.into())).await.is_err() {
-                        break;
+                        break 'socket;
                     }
                 }
             }
