@@ -232,10 +232,7 @@ async fn routeplanner_status(headers: HeaderMap, State(state): State<AppState>) 
     StatusCode::NO_CONTENT.into_response()
 }
 
-async fn routeplanner_free_address(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> Response {
+async fn routeplanner_free_address(headers: HeaderMap, State(state): State<AppState>) -> Response {
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
@@ -246,10 +243,7 @@ async fn routeplanner_free_address(
     )
 }
 
-async fn routeplanner_free_all(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> Response {
+async fn routeplanner_free_all(headers: HeaderMap, State(state): State<AppState>) -> Response {
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
