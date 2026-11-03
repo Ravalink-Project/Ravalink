@@ -354,11 +354,7 @@ pub struct AudioPlayerStore {
 }
 
 impl AudioPlayerStore {
-    async fn get_or_create(
-        &self,
-        session_id: &str,
-        guild_id: &str,
-    ) -> SharedNativePlayer {
+    async fn get_or_create(&self, session_id: &str, guild_id: &str) -> SharedNativePlayer {
         let key = (session_id.to_owned(), guild_id.to_owned());
         let mut players = self.players.write().await;
         players
@@ -441,11 +437,7 @@ impl AudioPlayerStore {
         Some(player.snapshot())
     }
 
-    pub async fn get(
-        &self,
-        session_id: &str,
-        guild_id: &str,
-    ) -> Option<SharedNativePlayer> {
+    pub async fn get(&self, session_id: &str, guild_id: &str) -> Option<SharedNativePlayer> {
         self.players
             .read()
             .await
