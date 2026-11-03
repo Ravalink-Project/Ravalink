@@ -363,14 +363,22 @@ async fn update_player(
     };
 
     let field_validators: [(&str, fn(&serde_json::Value) -> bool); 7] = [
-        ("identifier", |value| value.is_null() || value.is_string()),
-        ("encodedTrack", |value| value.is_null() || value.is_string()),
-        ("track", |value| value.is_null() || value.is_object()),
+        ("identifier", |value: &serde_json::Value| {
+            value.is_null() || value.is_string()
+        }),
+        ("encodedTrack", |value: &serde_json::Value| {
+            value.is_null() || value.is_string()
+        }),
+        ("track", |value: &serde_json::Value| {
+            value.is_null() || value.is_object()
+        }),
         ("paused", |value| value.is_boolean()),
-        ("position", |value| value.as_u64().is_some()),
-        ("volume", |value| value
-            .as_u64()
-            .is_some_and(|volume| volume <= 1_000)),
+        ("position", |value: &serde_json::Value| {
+            value.as_u64().is_some()
+        }),
+        ("volume", |value: &serde_json::Value| {
+            value.as_u64().is_some_and(|volume| volume <= 1_000)
+        }),
         ("filters", |value| value.is_object()),
     ];
     for (field, valid) in field_validators {
