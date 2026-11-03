@@ -128,22 +128,30 @@ impl Config {
                 "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
             })?;
         }
-        if config.metrics.prometheus_enabled
-            && (!config.metrics.prometheus_endpoint.starts_with('/')
-                || config.metrics.prometheus_endpoint.starts_with("//")
-                || config.metrics.prometheus_endpoint.contains('?')
-                || config.metrics.prometheus_endpoint.contains('#'))
-        {
-            return Err(
-                "metrics.prometheus_endpoint must be an absolute path without query or fragment"
-                    .to_owned(),
-            );
-        }
+        validate_metrics_endpoint(
+            config.metrics.prometheus_enabled,
+            &config.metrics.prometheus_endpoint,
+        )?;
         if config.audio.opus_encoding_quality > 10 {
             return Err("audio.opus_encoding_quality must be between 0 and 10".to_owned());
         }
         Ok(config)
     }
+}
+
+fn validate_metrics_endpoint(enabled: bool, endpoint: &str) -> Result<(), String> {
+    if enabled
+        && (!endpoint.starts_with('/')
+            || endpoint.starts_with("//")
+            || endpoint.contains('?')
+            || endpoint.contains('#'))
+    {
+        return Err(
+            "metrics.prometheus_endpoint must be an absolute path without query or fragment"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -167,15 +175,12 @@ mod tests {
 
     #[test]
     fn prometheus_endpoint_must_be_an_absolute_path() {
-        let config: Config = toml::from_str(
-            r#"
-                [metrics]
-                prometheus_enabled = true
-                prometheus_endpoint = "metrics"
-            "#,
-        )
-        .unwrap();
-        assert!(!config.metrics.prometheus_endpoint.starts_with('/'));
+        assert!(validate_metrics_endpoint(true, "/metrics").is_ok());
+        assert!(validate_metrics_endpoint(false, "metrics").is_ok());
+        assert!(validate_metrics_endpoint(true, "metrics").is_err());
+        assert!(validate_metrics_endpoint(true, "//metrics").is_err());
+        assert!(validate_metrics_endpoint(true, "/metrics?format=text").is_err());
+        assert!(validate_metrics_endpoint(true, "/metrics#fragment").is_err());
     }
 
     #[test]
