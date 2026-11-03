@@ -54,6 +54,37 @@ struct PlayerUpdateQuery {
 
 type PlayerFieldValidator = (&'static str, fn(&serde_json::Value) -> bool);
 
+fn invalid_player_field(
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'static str> {
+    let field_validators: [PlayerFieldValidator; 7] = [
+        ("identifier", |value: &serde_json::Value| {
+            value.is_null() || value.is_string()
+        }),
+        ("encodedTrack", |value: &serde_json::Value| {
+            value.is_null() || value.is_string()
+        }),
+        ("track", |value: &serde_json::Value| {
+            value.is_null() || value.is_object()
+        }),
+        ("paused", |value: &serde_json::Value| value.is_boolean()),
+        ("position", |value: &serde_json::Value| {
+            value.as_u64().is_some()
+        }),
+        ("volume", |value: &serde_json::Value| {
+            value.as_u64().is_some_and(|volume| volume <= 1_000)
+        }),
+        ("filters", |value: &serde_json::Value| value.is_object()),
+    ];
+    field_validators.into_iter().find_map(|(field, valid)| {
+        fields
+            .get(field)
+            .filter(|value| !valid(value))
+            .map(|_| field)
+    })
+}
+
+
 #[tokio::main]
 async fn main() {
     let config = config::Config::load().expect("failed to load RavaLink configuration");
@@ -367,35 +398,13 @@ async fn delete_player(
     }
     if state.sessions.get(&session_id).await.is_none() {
         return api_error(
-            StatusCode::NOT_FOUND,
-            "Session not found",
-            &format!("/v4/sessions/{session_id}"),
-        );
-    }
-    state.audio_players.remove(&session_id, &_guild_id).await;
-    state.players.remove(&session_id, &_guild_id).await;
-    StatusCode::NO_CONTENT.into_response()
-}
-
-async fn update_player(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Path((session_id, guild_id)): Path<(String, String)>,
-    Query(query): Query<PlayerUpdateQuery>,
-    Json(update): Json<serde_json::Value>,
-) -> Response {
-    if let Some(response) = authorization_failure(&headers, &state) {
-        return response;
-    }
-    let path = format!("/v4/sessions/{session_id}/players/{guild_id}");
-    if state.sessions.get(&session_id).await.is_none() {
-        return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
-    }
-    let Some(fields) = update.as_object() else {
+        if let Some(field) = invalid_player_field(fields) {
         return api_error(
             StatusCode::BAD_REQUEST,
-            "Player update must be a JSON object",
+            &format!("Invalid value for player field '{field}'"),
             &path,
+        );
+    } &path,
         );
     };
 
@@ -889,6 +898,36 @@ mod routeplanner_tests {
             HeaderValue::from_static("test-password"),
         );
         headers
+    }
+
+    #[test]
+    fn player_update_validation_rejects_invalid_field_types_and_ranges() {
+        let valid = serde_json::json!({
+            "identifier": "https://cdn.example/audio.mp3",
+            "encodedTrack": null,
+            "track": null,
+            "paused": false,
+            "position": 0,
+            "volume": 1000,
+            "filters": {}
+        });
+        assert_eq!(invalid_player_field(valid.as_object().unwrap()), None);
+
+        for (field, value) in [
+            ("identifier", serde_json::json!(42)),
+            ("encodedTrack", serde_json::json!(false)),
+            ("track", serde_json::json!("not-an-object")),
+            ("paused", serde_json::json!("true")),
+            ("position", serde_json::json!(-1)),
+            ("volume", serde_json::json!(1001)),
+            ("filters", serde_json::json!([])),
+        ] {
+            let invalid = serde_json::json!({field: value});
+            assert_eq!(
+                invalid_player_field(invalid.as_object().unwrap()),
+                Some(field)
+            );
+        }
     }
 
     #[tokio::test]
