@@ -224,7 +224,9 @@ impl RavaLinkPlugin for YouTubePlugin {
                     .data
                     .get_mut("tracks")
                     .and_then(Value::as_array_mut)
-                    .ok_or_else(|| PluginError::new("youtube", "playlist response has no tracks"))?;
+                    .ok_or_else(|| {
+                        PluginError::new("youtube", "playlist response has no tracks")
+                    })?;
                 let selected = tracks.iter().position(|track| {
                     track
                         .get("info")
@@ -235,12 +237,17 @@ impl RavaLinkPlugin for YouTubePlugin {
                 if let Some(index) = selected {
                     if let Some(start_seconds) = parsed.start_seconds {
                         let mut track: Track = serde_json::from_value(tracks[index].clone())
-                            .map_err(|error| PluginError::new("youtube", format!("invalid playlist track: {error}")))?;
+                            .map_err(|error| {
+                                PluginError::new(
+                                    "youtube",
+                                    format!("invalid playlist track: {error}"),
+                                )
+                            })?;
                         track.info.position = start_seconds.saturating_mul(1_000);
                         track.encoded = encode_track(&track)
                             .map_err(|error| PluginError::new("youtube", error.message))?;
-                        tracks[index] = serde_json::to_value(track)
-                            .expect("playlist track serializes");
+                        tracks[index] =
+                            serde_json::to_value(track).expect("playlist track serializes");
                     }
                     result.data["info"]["selectedTrack"] = json!(index);
                 }
