@@ -430,6 +430,18 @@ impl AudioPlayerStore {
         player.load_decoded_track(track, frames)
     }
 
+    pub async fn next_voice_frame(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+    ) -> Result<Option<PcmFrame>, AudioError> {
+        let Some(player) = self.get(session_id, guild_id).await else {
+            return Ok(None);
+        };
+        let mut player = player.lock().await;
+        player.next_voice_frame()
+    }
+
     pub async fn next_frame(
         &self,
         session_id: &str,

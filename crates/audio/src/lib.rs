@@ -5,6 +5,7 @@
 //! Discord voice transport adapters can feed frames into this layer.
 
 use ravalink_protocol::{Filters, Omissible};
+use crate::voice_pcm::VoicePcmPacketizer;
 
 pub mod http_source;
 pub mod voice_pcm;
@@ -487,6 +488,7 @@ pub struct NativePlayer {
     decoded_frames: Vec<PcmFrame>,
     next_frame_index: usize,
     processor: DspProcessor,
+    voice_packetizer: VoicePcmPacketizer,
 }
 
 impl Default for NativePlayer {
@@ -505,6 +507,7 @@ impl NativePlayer {
             decoded_frames: Vec::new(),
             next_frame_index: 0,
             processor: DspProcessor::new(filters),
+            voice_packetizer: VoicePcmPacketizer::new(),
         }
     }
 
@@ -536,6 +539,20 @@ impl NativePlayer {
     }
 
     /// Return the next decoded frame after applying the player's DSP chain.
+    /// Return the next complete 20 ms stereo 48 kHz frame ready for Opus encoding.
+    pub fn next_voice_frame(&mut self) -> Result<Option<PcmFrame>, AudioError> {
+        loop {
+            if let Some(frame) = self.voice_packetizer.pop_frame() {
+                return Ok(Some(frame));
+            }
+            let Some(frame) = self.next_frame()? else {
+                self.voice_packetizer.clear();
+                return Ok(None);
+            };
+            self.voice_packetizer.push(&frame)?;
+        }
+    }
+
     pub fn next_frame(&mut self) -> Result<Option<PcmFrame>, AudioError> {
         if self.track.is_none() || self.paused {
             return Ok(None);
@@ -600,6 +617,7 @@ impl AudioPipeline for NativePlayer {
         self.position_ms = 0;
         self.decoded_frames.clear();
         self.next_frame_index = 0;
+        self.voice_packetizer.clear();
         Ok(())
     }
 
@@ -629,6 +647,7 @@ impl AudioPipeline for NativePlayer {
             return Err(AudioError::invalid("seek position exceeds track duration"));
         }
         self.position_ms = position_ms;
+        self.voice_packetizer.clear();
         if !self.decoded_frames.is_empty() {
             let mut elapsed_ms = 0_u64;
             let mut index = 0;
@@ -652,6 +671,7 @@ impl AudioPipeline for NativePlayer {
         self.position_ms = 0;
         self.decoded_frames.clear();
         self.next_frame_index = 0;
+        self.voice_packetizer.clear();
         self.processor.reset_state();
         Ok(())
     }
@@ -779,6 +799,32 @@ mod tests {
         assert!(player.next_frame().unwrap().is_some());
         assert!(player.next_frame().unwrap().is_none());
         assert!(player.snapshot().track.is_none());
+    }
+
+    #[test]
+    fn native_player_emits_voice_ready_twenty_millisecond_frames() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "short".into(),
+                    title: "Short".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(20),
+                    is_stream: false,
+                },
+                vec![
+                    frame(vec![0.1; 960], 2),
+                    frame(vec![0.2; 960], 2),
+                ],
+            )
+            .unwrap();
+
+        let voice_frame = player.next_voice_frame().unwrap().unwrap();
+        assert_eq!(voice_frame.samples.len(), 1_920);
+        assert_eq!(voice_frame.channels, 2);
+        assert_eq!(voice_frame.sample_rate, 48_000);
+        assert!(player.next_voice_frame().unwrap().is_none());
     }
 
     #[test]
