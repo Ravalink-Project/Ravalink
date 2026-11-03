@@ -4,7 +4,7 @@
 //! processor operates on interleaved floating-point PCM frames. Codec and
 //! Discord voice transport adapters can feed frames into this layer.
 
-use crate::voice_pcm::VoicePcmPacketizer;
+use crate::{opus::OpusFrameEncoder, voice_pcm::VoicePcmPacketizer};
 use ravalink_protocol::{Filters, Omissible};
 
 pub mod http_source;
@@ -491,6 +491,8 @@ pub struct NativePlayer {
     next_frame_index: usize,
     processor: DspProcessor,
     voice_packetizer: VoicePcmPacketizer,
+    opus_encoder: Option<OpusFrameEncoder>,
+    opus_complexity: u8,
 }
 
 impl Default for NativePlayer {
@@ -510,6 +512,8 @@ impl NativePlayer {
             next_frame_index: 0,
             processor: DspProcessor::new(filters),
             voice_packetizer: VoicePcmPacketizer::new(),
+            opus_encoder: None,
+            opus_complexity: 10,
         }
     }
 
@@ -541,6 +545,21 @@ impl NativePlayer {
     }
 
     /// Return the next decoded frame after applying the player's DSP chain.
+    /// Encode the next decoded frame as a native Opus packet.
+    pub fn next_opus_packet(&mut self) -> Result<Option<Vec<u8>>, AudioError> {
+        let Some(frame) = self.next_voice_frame()? else {
+            return Ok(None);
+        };
+        if self.opus_encoder.is_none() {
+            self.opus_encoder = Some(OpusFrameEncoder::new(128_000, self.opus_complexity)?);
+        }
+        self.opus_encoder
+            .as_mut()
+            .expect("Opus encoder was initialized")
+            .encode(&frame)
+            .map(Some)
+    }
+
     /// Return the next complete 20 ms stereo 48 kHz frame ready for Opus encoding.
     pub fn next_voice_frame(&mut self) -> Result<Option<PcmFrame>, AudioError> {
         loop {
@@ -620,6 +639,9 @@ impl AudioPipeline for NativePlayer {
         self.decoded_frames.clear();
         self.next_frame_index = 0;
         self.voice_packetizer.clear();
+        if let Some(encoder) = self.opus_encoder.as_mut() {
+            encoder.reset()?;
+        }
         Ok(())
     }
 
@@ -674,6 +696,9 @@ impl AudioPipeline for NativePlayer {
         self.decoded_frames.clear();
         self.next_frame_index = 0;
         self.voice_packetizer.clear();
+        if let Some(encoder) = self.opus_encoder.as_mut() {
+            encoder.reset()?;
+        }
         self.processor.reset_state();
         Ok(())
     }
