@@ -100,7 +100,7 @@ impl HttpSourceManager {
 
         let extension = url
             .path_segments()
-            .and_then(Iterator::last)
+            .and_then(|segments| segments.last())
             .and_then(|segment| segment.rsplit_once('.').map(|(_, extension)| extension))
             .map(str::to_ascii_lowercase);
         let probe = probe_name(extension.as_deref(), &content_type)
@@ -159,7 +159,8 @@ impl HttpSourceManager {
             plugin_info: json!({}),
             user_data: json!({}),
         };
-        track.encoded = encode_track_with_source_data(&track, Some(probe))?;
+        track.encoded = encode_track_with_source_data(&track, Some(probe))
+            .map_err(|error| AudioError::invalid(error.message))?;
         self.insert_cache(track.encoded.clone(), frames, pcm_bytes)?;
         Ok(ResolvedHttpTrack { track, duration_ms })
     }
@@ -248,7 +249,7 @@ fn probe_name(extension: Option<&str>, content_type: &str) -> Option<&'static st
 
 fn media_title(url: &reqwest::Url) -> String {
     url.path_segments()
-        .and_then(Iterator::last)
+        .and_then(|segments| segments.last())
         .filter(|segment| !segment.is_empty())
         .unwrap_or("Untitled audio")
         .to_owned()
