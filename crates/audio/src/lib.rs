@@ -12,11 +12,13 @@ pub mod opus;
 pub mod rtp;
 pub mod voice_crypto;
 pub mod voice_pcm;
+pub mod voice_udp;
 pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
 pub use opus::OpusFrameEncoder;
 pub use rtp::RtpPacketizer;
 pub use voice_crypto::{VoiceEncryptionMode, VoicePacketEncryptor, VoicePacketPipeline};
 pub use voice_pcm::{VOICE_FRAME_SAMPLES_PER_CHANNEL, normalize_for_voice};
+pub use voice_udp::DiscordUdpTransport;
 
 /// Interleaved floating-point PCM audio.
 #[derive(Debug, Clone, PartialEq)]
