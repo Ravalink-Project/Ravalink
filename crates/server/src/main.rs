@@ -410,9 +410,7 @@ async fn update_player(
             "track".to_owned(),
             serde_json::to_value(track).expect("Track serializes to JSON"),
         );
-    } else if fields.get("track").is_some_and(serde_json::Value::is_null)
-        || encoded_track_is_null
-    {
+    } else if fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null {
         state.audio_players.stop(&session_id, &guild_id).await;
         let object = normalized_update
             .as_object_mut()
@@ -514,10 +512,7 @@ async fn resolve_player_track(
         })
         .ok_or_else(|| "track update must contain an encoded track".to_owned())?;
     let mut track = decode_track(encoded).map_err(|error| error.message)?;
-    if let Some(user_data) = fields
-        .get("track")
-        .and_then(|value| value.get("userData"))
-    {
+    if let Some(user_data) = fields.get("track").and_then(|value| value.get("userData")) {
         track.user_data = user_data.clone();
     }
 
