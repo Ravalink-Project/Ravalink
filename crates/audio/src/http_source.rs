@@ -5,6 +5,7 @@ use ravalink_protocol::{Track, TrackInfo, encode_track_with_source_data};
 use serde_json::json;
 use std::{
     collections::HashMap,
+    net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -14,7 +15,6 @@ const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct HttpSourceManager {
-    client: reqwest::Client,
     cache: Arc<Mutex<CacheState>>,
     max_cache_bytes: usize,
 }
@@ -46,13 +46,7 @@ impl Default for HttpSourceManager {
 
 impl HttpSourceManager {
     pub fn new(max_cache_bytes: usize) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(45))
-            .user_agent("RavaLink/0.1 native-audio")
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client,
             cache: Arc::new(Mutex::new(CacheState::default())),
             max_cache_bytes,
         }
@@ -71,8 +65,37 @@ impl HttpSourceManager {
             ));
         }
 
-        let mut response = self
-            .client
+        let host = url
+            .host_str()
+            .ok_or_else(|| AudioError::invalid("HTTP source URL has no host"))?;
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| AudioError::invalid("HTTP source URL has no known port"))?;
+        let addresses = match host.parse::<IpAddr>() {
+            Ok(address) => vec![SocketAddr::new(address, port)],
+            Err(_) => tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|error| {
+                    AudioError::invalid(format!("cannot resolve HTTP source host: {error}"))
+                })?
+                .collect::<Vec<_>>(),
+        };
+        if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+            return Err(AudioError::invalid(
+                "HTTP source host resolves to a private or reserved network address",
+            ));
+        }
+
+        // Pin validated DNS answers and disable redirects/proxies to prevent SSRF bypasses.
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(45))
+            .user_agent("RavaLink/0.1 native-audio")
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .resolve_to_addrs(host, &addresses)
+            .build()
+            .map_err(|error| AudioError::invalid(format!("cannot build HTTP client: {error}")))?;
+        let mut response = client
             .get(url.clone())
             .send()
             .await
@@ -242,6 +265,37 @@ impl HttpSourceManager {
     }
 }
 
+fn is_public_ip(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            let [a, b, c, _] = address.octets();
+            !address.is_private()
+                && !address.is_loopback()
+                && !address.is_link_local()
+                && !address.is_unspecified()
+                && !address.is_broadcast()
+                && !address.is_multicast()
+                && !(a == 100 && (64..=127).contains(&b))
+                && !(a == 192 && b == 0)
+                && !(a == 192 && b == 0 && c == 2)
+                && !(a == 198 && (b == 18 || b == 19 || b == 51))
+                && !(a == 203 && b == 0 && c == 113)
+                && a < 224
+        }
+        IpAddr::V6(address) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(mapped));
+            }
+            !address.is_loopback()
+                && !address.is_unspecified()
+                && !address.is_multicast()
+                && !address.is_unique_local()
+                && !address.is_unicast_link_local()
+                && !address.is_documentation()
+        }
+    }
+}
+
 fn probe_name(extension: Option<&str>, content_type: &str) -> Option<&'static str> {
     match extension {
         Some("mp3") => Some("MPEG"),
@@ -312,6 +366,24 @@ mod tests {
         assert!(manager.take_frames("track").unwrap().is_some());
         assert!(manager.take_frames("track").unwrap().is_none());
         assert_eq!(manager.cached_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn rejects_private_and_reserved_network_addresses() {
+        for address in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "100.64.0.1",
+            "192.168.1.1",
+            "169.254.1.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(!is_public_ip(address.parse().unwrap()), "{address}");
+        }
+        assert!(is_public_ip("1.1.1.1".parse().unwrap()));
+        assert!(is_public_ip("2606:4700::1111".parse().unwrap()));
     }
 
     #[test]
