@@ -268,7 +268,7 @@ impl HttpSourceManager {
 fn is_public_ip(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
-            let [a, b, _, _] = address.octets();
+            let [a, b, c, _] = address.octets();
             !address.is_private()
                 && !address.is_loopback()
                 && !address.is_link_local()
