@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-const MAX_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 

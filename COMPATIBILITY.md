@@ -18,7 +18,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
 | Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP track resolution loads decoded PCM into NativePlayer; volume, filters, pause, seek and stop update native state; Discord voice output/events still absent |
 | Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
-| Audio sources | Search, resolve, stream, errors | Bounded direct HTTP(S) file resolver only; 128 MiB download cap and 256 MiB decoded PCM cache; no search providers or live stream support |
+| Audio sources | Search, resolve, stream, errors | Bounded direct HTTP(S) file resolver only; configurable download cap (128 MiB default) and decoded PCM cache (256 MiB default); no search providers or live stream support |
 | Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and REST-to-NativePlayer loading/control; bounded PCM frame queue; no continuous source streaming, time-stretch or Opus yet |
 | Discord voice | Gateway voice handshake, DAVE, RTP, encryption | Not implemented |
 | Plugins | Native extension API | Not implemented |

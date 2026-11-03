@@ -41,6 +41,8 @@ Configuration is loaded from `config/ravalink.toml` by default, or from
 - `RAVALINK_PORT`
 - `RAVALINK_PASSWORD`
 - `RAVALINK_LOG_LEVEL`
+- `RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES` (default: 134217728)
+- `RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES` (default: 268435456)
 
 A sample is available at [config/ravalink.example.toml](config/ravalink.example.toml).
 
