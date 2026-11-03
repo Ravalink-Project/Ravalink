@@ -10,11 +10,15 @@ password = "youshallnotpass"
 level = "info"
 
 [audio]
-# These settings will be wired into the native audio pipeline as it is implemented.
+# Audio buffering and bounded source/cache memory.
 buffer_duration_ms = 400
 frame_buffer_duration_ms = 5000
 opus_encoding_quality = 10
 resampling_quality = "low"
+# Maximum compressed HTTP(S) source size accepted by the direct-file resolver.
+max_source_download_bytes = 134217728
+# Maximum decoded PCM retained in memory across pending/loaded tracks.
+max_decoded_cache_bytes = 268435456
 
 [metrics]
 prometheus_enabled = false

@@ -71,7 +71,10 @@ async fn main() {
         sessions: SessionStore::default(),
         players: PlayerStore::default(),
         audio_players: AudioPlayerStore::default(),
-        http_sources: HttpSourceManager::default(),
+        http_sources: HttpSourceManager::with_limits(
+            config.audio.max_source_download_bytes,
+            config.audio.max_decoded_cache_bytes,
+        ),
         started_at: Instant::now(),
     };
 

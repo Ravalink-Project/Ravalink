@@ -12,11 +12,13 @@ use std::{
 
 const MAX_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
+const DEFAULT_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct HttpSourceManager {
     cache: Arc<Mutex<CacheState>>,
     max_cache_bytes: usize,
+    max_download_bytes: usize,
 }
 
 #[derive(Default)]
@@ -40,15 +42,20 @@ pub struct ResolvedHttpTrack {
 
 impl Default for HttpSourceManager {
     fn default() -> Self {
-        Self::new(DEFAULT_CACHE_BYTES)
+        Self::with_limits(DEFAULT_DOWNLOAD_BYTES, DEFAULT_CACHE_BYTES)
     }
 }
 
 impl HttpSourceManager {
     pub fn new(max_cache_bytes: usize) -> Self {
+        Self::with_limits(DEFAULT_DOWNLOAD_BYTES, max_cache_bytes)
+    }
+
+    pub fn with_limits(max_download_bytes: usize, max_cache_bytes: usize) -> Self {
         Self {
             cache: Arc::new(Mutex::new(CacheState::default())),
             max_cache_bytes,
+            max_download_bytes,
         }
     }
 
@@ -107,7 +114,7 @@ impl HttpSourceManager {
 
         if response
             .content_length()
-            .is_some_and(|length| length > MAX_DOWNLOAD_BYTES as u64)
+            .is_some_and(|length| length > self.max_download_bytes as u64)
         {
             return Err(AudioError::invalid(
                 "HTTP source exceeds the 128 MiB download limit",
@@ -125,7 +132,7 @@ impl HttpSourceManager {
             .await
             .map_err(|error| AudioError::invalid(format!("cannot read HTTP source: {error}")))?
         {
-            if body.len().saturating_add(chunk.len()) > MAX_DOWNLOAD_BYTES {
+            if body.len().saturating_add(chunk.len()) > self.max_download_bytes {
                 return Err(AudioError::invalid(
                     "HTTP source exceeds the 128 MiB download limit",
                 ));

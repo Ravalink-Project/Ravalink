@@ -51,6 +51,8 @@ pub struct AudioConfig {
     pub frame_buffer_duration_ms: u64,
     pub opus_encoding_quality: u8,
     pub resampling_quality: String,
+    pub max_source_download_bytes: usize,
+    pub max_decoded_cache_bytes: usize,
 }
 
 impl Default for AudioConfig {
@@ -60,6 +62,8 @@ impl Default for AudioConfig {
             frame_buffer_duration_ms: 5_000,
             opus_encoding_quality: 10,
             resampling_quality: "low".into(),
+            max_source_download_bytes: 128 * 1024 * 1024,
+            max_decoded_cache_bytes: 256 * 1024 * 1024,
         }
     }
 }
@@ -114,6 +118,16 @@ impl Config {
         if let Ok(value) = env::var("RAVALINK_LOG_LEVEL") {
             config.logging.level = value;
         }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES") {
+            config.audio.max_source_download_bytes = value.parse().map_err(|_| {
+                "RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES must be a valid usize".to_owned()
+            })?;
+        }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES") {
+            config.audio.max_decoded_cache_bytes = value.parse().map_err(|_| {
+                "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
+            })?;
+        }
         Ok(config)
     }
 }
@@ -121,6 +135,21 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_source_memory_limits_are_configurable_in_toml() {
+        let config: Config = toml::from_str(
+            r#"
+                [audio]
+                max_source_download_bytes = 16777216
+                max_decoded_cache_bytes = 33554432
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.audio.max_source_download_bytes, 16 * 1024 * 1024);
+        assert_eq!(config.audio.max_decoded_cache_bytes, 32 * 1024 * 1024);
+    }
 
     #[test]
     fn partial_toml_configuration_keeps_defaults() {
@@ -139,6 +168,8 @@ mod tests {
         assert_eq!(config.server.address, "0.0.0.0");
         assert_eq!(config.logging.level, "debug");
         assert_eq!(config.audio.opus_encoding_quality, 10);
+        assert_eq!(config.audio.max_source_download_bytes, 128 * 1024 * 1024);
+        assert_eq!(config.audio.max_decoded_cache_bytes, 256 * 1024 * 1024);
         assert!(!config.metrics.prometheus_enabled);
     }
 }
