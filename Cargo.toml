@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/core",
+    "crates/audio",
+    "crates/server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Ravalink-Project/Ravalink"
+
+[workspace.dependencies]
+axum = { version = "0.8", features = ["ws", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+sysinfo = "0.33"
+toml = "0.8"

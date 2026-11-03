@@ -1,0 +1,21 @@
+[package]
+name = "ravalink-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ravalink"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+sysinfo.workspace = true
+toml.workspace = true
+ravalink-protocol = { path = "../protocol" }
+ravalink-core = { path = "../core" }

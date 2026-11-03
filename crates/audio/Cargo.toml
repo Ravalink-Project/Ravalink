@@ -1,0 +1,12 @@
+[package]
+name = "ravalink-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ravalink-protocol = { path = "../protocol" }
+symphonia = { version = "0.5", features = ["all"] }
+
+[dev-dependencies]
+serde_json.workspace = true
