@@ -130,7 +130,9 @@ fn parse_discovery_response(
     let address = address.trim();
     if address.is_empty()
         || address.len() > 63
-        || address.bytes().any(|byte| !(byte.is_ascii_digit() || byte == b'.'))
+        || address
+            .bytes()
+            .any(|byte| !(byte.is_ascii_digit() || byte == b'.'))
         || address.parse::<std::net::Ipv4Addr>().is_err()
     {
         return Err(AudioError::invalid(
@@ -140,7 +142,9 @@ fn parse_discovery_response(
 
     let port = u16::from_be_bytes([packet[72], packet[73]]);
     if port == 0 {
-        return Err(AudioError::invalid("voice discovery returned an invalid external UDP port"));
+        return Err(AudioError::invalid(
+            "voice discovery returned an invalid external UDP port",
+        ));
     }
     Ok((address.to_owned(), port))
 }
