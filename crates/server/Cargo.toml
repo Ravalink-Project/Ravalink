@@ -19,3 +19,4 @@ sysinfo.workspace = true
 toml.workspace = true
 ravalink-protocol = { path = "../protocol" }
 ravalink-core = { path = "../core" }
+ravalink-audio = { path = "../audio" }

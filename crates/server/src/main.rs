@@ -215,6 +215,245 @@ async fn load_tracks(
         }
     }
 }
+
+async fn update_session(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Json(update): Json<SessionUpdate>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    match state
+        .sessions
+        .update(&session_id, update.resuming, update.timeout)
+        .await
+    {
+        Some(session) => Json(SessionInfo {
+            resuming: session.resumable,
+            timeout: session.resume_timeout_seconds,
+        })
+        .into_response(),
+        None => api_error(
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            &format!("/v4/sessions/{session_id}"),
+        ),
+    }
+}
+
+async fn get_players(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    if state.sessions.get(&session_id).await.is_none() {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            &format!("/v4/sessions/{session_id}/players"),
+        );
+    }
+    Json(state.players.list(&session_id).await).into_response()
+}
+
+async fn get_player(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((session_id, guild_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    if state.sessions.get(&session_id).await.is_none() {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            &format!("/v4/sessions/{session_id}/players/{guild_id}"),
+        );
+    }
+    match state.players.get(&session_id, &guild_id).await {
+        Some(player) => Json(player).into_response(),
+        None => api_error(
+            StatusCode::NOT_FOUND,
+            "Player not found",
+            &format!("/v4/sessions/{session_id}/players/{guild_id}"),
+        ),
+    }
+}
+
+async fn delete_player(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((session_id, _guild_id)): Path<(String, String)>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    if state.sessions.get(&session_id).await.is_none() {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            &format!("/v4/sessions/{session_id}"),
+        );
+    }
+    state.players.remove(&session_id, &_guild_id).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn update_player(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((session_id, guild_id)): Path<(String, String)>,
+    Query(query): Query<PlayerUpdateQuery>,
+    Json(update): Json<serde_json::Value>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    let path = format!("/v4/sessions/{session_id}/players/{guild_id}");
+    if state.sessions.get(&session_id).await.is_none() {
+        return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
+    }
+    let Some(fields) = update.as_object() else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Player update must be a JSON object",
+            &path,
+        );
+    };
+
+    let has_identifier = fields
+        .get("identifier")
+        .is_some_and(|value| !value.is_null());
+    let has_encoded_track = fields
+        .get("encodedTrack")
+        .is_some_and(|value| !value.is_null());
+    let has_track_object = fields.get("track").is_some_and(|track| !track.is_null());
+    let has_track_request = has_identifier || has_encoded_track || has_track_object;
+    let encoded_track_is_null = fields
+        .get("encodedTrack")
+        .is_some_and(serde_json::Value::is_null);
+    if fields.contains_key("track")
+        && (fields.contains_key("identifier") || fields.contains_key("encodedTrack"))
+    {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Cannot specify both track and encodedTrack/identifier",
+            &path,
+        );
+    }
+    if fields.contains_key("identifier") && fields.contains_key("encodedTrack") {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Cannot specify both encodedTrack and identifier",
+            &path,
+        );
+    }
+
+    if query.no_replace
+        && has_track_request
+        && let Some(player) = state.players.get(&session_id, &guild_id).await
+        && !player["track"].is_null()
+    {
+        return Json(player).into_response();
+    }
+
+    if has_track_request || fields.contains_key("voice") {
+        return api_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "Track resolution and Discord voice transport are not implemented yet",
+            &path,
+        );
+    }
+    if let Some(end_time) = fields.get("endTime").filter(|value| !value.is_null())
+        && end_time.as_u64().is_none_or(|value| value == 0)
+    {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "End time must be greater than 0",
+            &path,
+        );
+    }
+
+    let fields = fields.clone();
+    let mut normalized_update = update;
+    if encoded_track_is_null {
+        let object = normalized_update
+            .as_object_mut()
+            .expect("validated JSON object");
+        object.remove("encodedTrack");
+        object.insert("track".to_owned(), serde_json::Value::Null);
+    }
+    if fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null {
+        state.audio_players.stop(&session_id, &guild_id).await;
+    }
+    if let Some(volume) = fields.get("volume") {
+        let Some(volume) = volume.as_u64().and_then(|value| u16::try_from(value).ok()) else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "Volume must be an integer from 0 to 1000",
+                &path,
+            );
+        };
+        if let Err(error) = state
+            .audio_players
+            .set_volume(&session_id, &guild_id, volume)
+            .await
+        {
+            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+        }
+    }
+    if let Some(filters) = fields.get("filters") {
+        let filters = match serde_json::from_value::<ravalink_protocol::Filters>(filters.clone()) {
+            Ok(filters) => filters,
+            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error.to_string(), &path),
+        };
+        state
+            .audio_players
+            .set_filters(&session_id, &guild_id, filters)
+            .await;
+    }
+    if let Some(paused) = fields.get("paused").and_then(serde_json::Value::as_bool)
+        && state
+            .audio_players
+            .snapshot(&session_id, &guild_id)
+            .await
+            .is_some_and(|snapshot| snapshot.track.is_some())
+        && let Err(error) = state
+            .audio_players
+            .pause(&session_id, &guild_id, paused)
+            .await
+    {
+        return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+    }
+    if let Some(position) = fields.get("position").and_then(serde_json::Value::as_u64)
+        && state
+            .audio_players
+            .snapshot(&session_id, &guild_id)
+            .await
+            .is_some_and(|snapshot| snapshot.track.is_some())
+        && let Err(error) = state
+            .audio_players
+            .seek(&session_id, &guild_id, position)
+            .await
+    {
+        return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+    }
+
+    Json(
+        state
+            .players
+            .update(&session_id, &guild_id, normalized_update)
+            .await,
+    )
+    .into_response()
+}
+
 async fn decode_track_endpoint(
     headers: HeaderMap,
     State(state): State<AppState>,
