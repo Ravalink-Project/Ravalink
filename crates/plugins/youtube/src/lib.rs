@@ -331,9 +331,7 @@ impl ParsedUrl<'_> {
 
 fn parse_url(value: &str) -> Option<ParsedUrl<'_>> {
     let (_, rest) = value.split_once("://")?;
-    let authority_end = rest
-        .find(['/', '?', '#'])
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     let host = authority
         .rsplit('@')
@@ -342,9 +340,7 @@ fn parse_url(value: &str) -> Option<ParsedUrl<'_>> {
         .next()?
         .to_ascii_lowercase();
     let suffix = &rest[authority_end..];
-    let path_end = suffix
-        .find(['?', '#'])
-        .unwrap_or(suffix.len());
+    let path_end = suffix.find(['?', '#']).unwrap_or(suffix.len());
     let path = if path_end == 0 {
         "/"
     } else {
@@ -431,7 +427,9 @@ mod tests {
             json!({"type": "audio/mp4; codecs=mp4a.40.2", "bitrate": 96_000, "url": "https://cdn.test/aac"}),
         ];
         assert_eq!(
-            select_audio_format(&formats).and_then(|format| format.get("url")).and_then(Value::as_str),
+            select_audio_format(&formats)
+                .and_then(|format| format.get("url"))
+                .and_then(Value::as_str),
             Some("https://cdn.test/aac")
         );
     }

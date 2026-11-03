@@ -357,9 +357,7 @@ impl ParsedUrl<'_> {
 
 fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
     let (_, rest) = value.trim().split_once("://")?;
-    let end = rest
-        .find(['/', '?', '#'])
-        .unwrap_or(rest.len());
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let host = rest[..end]
         .split('@')
         .next_back()?
@@ -367,9 +365,7 @@ fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
         .next()?
         .to_ascii_lowercase();
     let suffix = &rest[end..];
-    let path_end = suffix
-        .find(['?', '#'])
-        .unwrap_or(suffix.len());
+    let path_end = suffix.find(['?', '#']).unwrap_or(suffix.len());
     let query = suffix
         .find('?')
         .map(|index| suffix[index + 1..].split('#').next().unwrap_or(""))
