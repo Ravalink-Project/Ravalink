@@ -349,7 +349,10 @@ impl LavaSrcPlugin {
             .json()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("invalid Spotify token response: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("invalid Spotify token response: {error}"),
+                )
             })?;
         let token = response
             .get("access_token")
@@ -381,16 +384,27 @@ impl LavaSrcPlugin {
                 "Spotify album",
             ),
             "playlist" => (
-                format!("https://api.spotify.com/v1/playlists/{}?market=US", parsed.id),
+                format!(
+                    "https://api.spotify.com/v1/playlists/{}?market=US",
+                    parsed.id
+                ),
                 "/tracks/items",
                 "Spotify playlist",
             ),
             "artist" => (
-                format!("https://api.spotify.com/v1/artists/{}/top-tracks?market=US", parsed.id),
+                format!(
+                    "https://api.spotify.com/v1/artists/{}/top-tracks?market=US",
+                    parsed.id
+                ),
                 "/tracks",
                 "Spotify artist top tracks",
             ),
-            _ => return Err(PluginError::new("lavasrc", "unsupported Spotify collection")),
+            _ => {
+                return Err(PluginError::new(
+                    "lavasrc",
+                    "unsupported Spotify collection",
+                ));
+            }
         };
         let data: Value = self
             .client
@@ -399,7 +413,10 @@ impl LavaSrcPlugin {
             .send()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("Spotify collection request failed: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("Spotify collection request failed: {error}"),
+                )
             })?
             .error_for_status()
             .map_err(|error| {
@@ -408,7 +425,10 @@ impl LavaSrcPlugin {
             .json()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("invalid Spotify collection response: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("invalid Spotify collection response: {error}"),
+                )
             })?;
         let items = data
             .pointer(tracks_path)
@@ -493,11 +513,18 @@ impl LavaSrcPlugin {
         let data: Value = self
             .client
             .get("https://itunes.apple.com/lookup")
-            .query(&[("id", parsed.id.as_str()), ("entity", "song"), ("limit", "25")])
+            .query(&[
+                ("id", parsed.id.as_str()),
+                ("entity", "song"),
+                ("limit", "25"),
+            ])
             .send()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("Apple Music collection request failed: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("Apple Music collection request failed: {error}"),
+                )
             })?
             .error_for_status()
             .map_err(|error| {
@@ -506,12 +533,17 @@ impl LavaSrcPlugin {
             .json()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("invalid Apple Music collection response: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("invalid Apple Music collection response: {error}"),
+                )
             })?;
         let items = data
             .get("results")
             .and_then(Value::as_array)
-            .ok_or_else(|| PluginError::new("lavasrc", "Apple Music collection contains no results"))?;
+            .ok_or_else(|| {
+                PluginError::new("lavasrc", "Apple Music collection contains no results")
+            })?;
         let name = items
             .iter()
             .find_map(|item| {
@@ -522,9 +554,11 @@ impl LavaSrcPlugin {
             .unwrap_or("Apple Music collection")
             .to_owned();
         let mut tracks = Vec::new();
-        for item in items.iter().filter(|item| {
-            item.get("wrapperType").and_then(Value::as_str) == Some("track")
-        }).take(15) {
+        for item in items
+            .iter()
+            .filter(|item| item.get("wrapperType").and_then(Value::as_str) == Some("track"))
+            .take(15)
+        {
             let Some(id) = item.get("trackId").and_then(Value::as_u64) else {
                 continue;
             };
