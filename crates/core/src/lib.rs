@@ -518,4 +518,3 @@ mod audio_player_store_tests {
         assert_eq!(store.snapshot("s", "g").await.unwrap().volume, 250);
     }
 }
-

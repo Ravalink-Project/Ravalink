@@ -414,7 +414,10 @@ async fn update_player(
         }
     }
     if let Some(position) = fields.get("position").and_then(serde_json::Value::as_u64) {
-        if state.audio_players.snapshot(&session_id, &guild_id).await
+        if state
+            .audio_players
+            .snapshot(&session_id, &guild_id)
+            .await
             .is_some_and(|snapshot| snapshot.track.is_some())
         {
             if let Err(error) = state
