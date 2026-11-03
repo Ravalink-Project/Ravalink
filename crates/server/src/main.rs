@@ -18,7 +18,7 @@ use ravalink_protocol::{
     WebSocketMessage, decode_track,
 };
 use serde::Deserialize;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use sysinfo::System;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
@@ -32,6 +32,7 @@ struct AppState {
     http_sources: HttpSourceManager,
     metrics_enabled: bool,
     player_update_interval: u64,
+    system: Arc<tokio::sync::Mutex<System>>,
     started_at: Instant,
 }
 
@@ -118,6 +119,7 @@ async fn main() {
         ),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
+        system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
         started_at: Instant::now(),
     };
 
@@ -230,7 +232,7 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
 }
 
 async fn collect_stats(state: &AppState) -> NodeStats {
-    let mut system = System::new_all();
+    let mut system = state.system.lock().await;
     system.refresh_all();
     system.refresh_cpu_usage();
     let total = system.total_memory();
@@ -959,6 +961,7 @@ mod server_api_tests {
             http_sources: HttpSourceManager::default(),
             metrics_enabled: false,
             player_update_interval: 5,
+            system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
             started_at: Instant::now(),
         }
     }
