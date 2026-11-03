@@ -118,9 +118,9 @@ impl Config {
             config.server.password = value;
         }
         if let Ok(value) = env::var("RAVALINK_PLAYER_UPDATE_INTERVAL") {
-            config.server.player_update_interval = value.parse().map_err(|_| {
-                "RAVALINK_PLAYER_UPDATE_INTERVAL must be a valid u64".to_owned()
-            })?;
+            config.server.player_update_interval = value
+                .parse()
+                .map_err(|_| "RAVALINK_PLAYER_UPDATE_INTERVAL must be a valid u64".to_owned())?;
         }
         if let Ok(value) = env::var("RAVALINK_LOG_LEVEL") {
             config.logging.level = value;
