@@ -863,3 +863,46 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
     )
         .into_response()
 }
+
+
+#[cfg(test)]
+mod routeplanner_tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    fn state() -> AppState {
+        AppState {
+            password: "test-password".into(),
+            sessions: SessionStore::default(),
+            players: PlayerStore::default(),
+            audio_players: AudioPlayerStore::default(),
+            http_sources: HttpSourceManager::default(),
+            metrics_enabled: false,
+            started_at: Instant::now(),
+        }
+    }
+
+    fn authorized_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("test-password"),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn routeplanner_status_returns_no_content_when_disabled() {
+        let response = routeplanner_status(authorized_headers(), State(state())).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn routeplanner_free_operations_report_disabled_planner() {
+        let address =
+            routeplanner_free_address(authorized_headers(), State(state())).await;
+        let all = routeplanner_free_all(authorized_headers(), State(state())).await;
+        assert_eq!(address.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(all.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}
