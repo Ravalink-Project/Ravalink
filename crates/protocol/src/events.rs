@@ -144,6 +144,25 @@ mod tests {
     }
 
     #[test]
+    fn player_update_message_matches_lavalink_wire_shape() {
+        let message = WebSocketMessage::PlayerUpdate(PlayerUpdateMessage {
+            guild_id: "123".into(),
+            state: PlayerStateUpdate {
+                time: 1_700_000_000_000,
+                position: 42_000,
+                connected: false,
+                ping: Some(-1),
+            },
+        });
+        let json = serde_json::to_value(message).unwrap();
+        assert_eq!(json["op"], "playerUpdate");
+        assert_eq!(json["guildId"], "123");
+        assert_eq!(json["state"]["position"], 42_000);
+        assert_eq!(json["state"]["connected"], false);
+        assert_eq!(json["state"]["ping"], -1);
+    }
+
+    #[test]
     fn track_end_event_uses_expected_discriminator_and_reason() {
         let event = WebSocketMessage::Event(TrackEvent::TrackEnd(TrackEndEvent {
             guild_id: "1".into(),
