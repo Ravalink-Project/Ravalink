@@ -397,37 +397,31 @@ async fn update_player(
             .set_filters(&session_id, &guild_id, filters)
             .await;
     }
-    if let Some(paused) = fields.get("paused").and_then(serde_json::Value::as_bool) {
-        if state
+    if let Some(paused) = fields.get("paused").and_then(serde_json::Value::as_bool)
+        && state
             .audio_players
             .snapshot(&session_id, &guild_id)
             .await
             .is_some_and(|snapshot| snapshot.track.is_some())
-        {
-            if let Err(error) = state
-                .audio_players
-                .pause(&session_id, &guild_id, paused)
-                .await
-            {
-                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-            }
-        }
+        && let Err(error) = state
+            .audio_players
+            .pause(&session_id, &guild_id, paused)
+            .await
+    {
+        return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
     }
-    if let Some(position) = fields.get("position").and_then(serde_json::Value::as_u64) {
-        if state
+    if let Some(position) = fields.get("position").and_then(serde_json::Value::as_u64)
+        && state
             .audio_players
             .snapshot(&session_id, &guild_id)
             .await
             .is_some_and(|snapshot| snapshot.track.is_some())
-        {
-            if let Err(error) = state
-                .audio_players
-                .seek(&session_id, &guild_id, position)
-                .await
-            {
-                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-            }
-        }
+        && let Err(error) = state
+            .audio_players
+            .seek(&session_id, &guild_id, position)
+            .await
+    {
+        return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
     }
 
     Json(
