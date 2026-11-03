@@ -136,6 +136,7 @@ impl Config {
             })?;
         }
         validate_player_update_interval(config.server.player_update_interval)?;
+        validate_server_password(&config.server.password)?;
         validate_metrics_endpoint(
             config.metrics.prometheus_enabled,
             &config.metrics.prometheus_endpoint,
@@ -145,6 +146,13 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+fn validate_server_password(password: &str) -> Result<(), String> {
+    if password.trim().is_empty() {
+        return Err("server.password must not be empty".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_player_update_interval(interval: u64) -> Result<(), String> {
@@ -159,7 +167,10 @@ fn validate_metrics_endpoint(enabled: bool, endpoint: &str) -> Result<(), String
         && (!endpoint.starts_with('/')
             || endpoint.starts_with("//")
             || endpoint.contains('?')
-            || endpoint.contains('#'))
+            || endpoint.contains('#')
+            || endpoint == "/version"
+            || endpoint == "/v4"
+            || endpoint.starts_with("/v4/"))
     {
         return Err(
             "metrics.prometheus_endpoint must be an absolute path without query or fragment"
@@ -189,6 +200,13 @@ mod tests {
     }
 
     #[test]
+    fn server_password_must_not_be_empty() {
+        assert!(validate_server_password("secret").is_ok());
+        assert!(validate_server_password("").is_err());
+        assert!(validate_server_password("   ").is_err());
+    }
+
+    #[test]
     fn player_update_interval_must_be_nonzero() {
         assert!(validate_player_update_interval(5).is_ok());
         assert!(validate_player_update_interval(0).is_err());
@@ -202,6 +220,8 @@ mod tests {
         assert!(validate_metrics_endpoint(true, "//metrics").is_err());
         assert!(validate_metrics_endpoint(true, "/metrics?format=text").is_err());
         assert!(validate_metrics_endpoint(true, "/metrics#fragment").is_err());
+        assert!(validate_metrics_endpoint(true, "/version").is_err());
+        assert!(validate_metrics_endpoint(true, "/v4/stats").is_err());
     }
 
     #[test]
