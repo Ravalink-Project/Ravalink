@@ -199,7 +199,10 @@ mod tests {
         encrypted_packet[0] = 0x80;
         encrypted_packet[12] = 0xaa;
         assert_eq!(
-            transport.send_voice_packet(&encrypted_packet).await.unwrap(),
+            transport
+                .send_voice_packet(&encrypted_packet)
+                .await
+                .unwrap(),
             encrypted_packet.len()
         );
 
