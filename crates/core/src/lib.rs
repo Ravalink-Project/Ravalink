@@ -418,6 +418,30 @@ impl AudioPlayerStore {
         player.lock().await.set_filters(filters);
     }
 
+    pub async fn load_decoded_track(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        track: AudioTrack,
+        frames: Vec<PcmFrame>,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        let mut player = player.lock().await;
+        player.load_decoded_track(track, frames)
+    }
+
+    pub async fn next_frame(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+    ) -> Result<Option<PcmFrame>, AudioError> {
+        let Some(player) = self.get(session_id, guild_id).await else {
+            return Ok(None);
+        };
+        let mut player = player.lock().await;
+        player.next_frame()
+    }
+
     pub async fn process_frame(
         &self,
         session_id: &str,

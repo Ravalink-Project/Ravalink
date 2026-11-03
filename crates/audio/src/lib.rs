@@ -463,6 +463,8 @@ pub struct NativePlayer {
     paused: bool,
     position_ms: u64,
     volume: u16,
+    decoded_frames: Vec<PcmFrame>,
+    next_frame_index: usize,
     processor: DspProcessor,
 }
 
@@ -479,6 +481,8 @@ impl NativePlayer {
             paused: false,
             position_ms: 0,
             volume: 100,
+            decoded_frames: Vec::new(),
+            next_frame_index: 0,
             processor: DspProcessor::new(filters),
         }
     }
@@ -494,6 +498,41 @@ impl NativePlayer {
 
     pub fn set_filters(&mut self, filters: Filters) {
         self.processor.set_filters(filters);
+    }
+
+    pub fn load_decoded_track(
+        &mut self,
+        track: AudioTrack,
+        frames: Vec<PcmFrame>,
+    ) -> Result<(), AudioError> {
+        if frames.is_empty() {
+            return Err(AudioError::invalid("decoded track contains no PCM frames"));
+        }
+        self.start(track)?;
+        self.decoded_frames = frames;
+        self.next_frame_index = 0;
+        Ok(())
+    }
+
+    /// Return the next decoded frame after applying the player's DSP chain.
+    pub fn next_frame(&mut self) -> Result<Option<PcmFrame>, AudioError> {
+        if self.track.is_none() || self.paused {
+            return Ok(None);
+        }
+        let Some(frame) = self.decoded_frames.get(self.next_frame_index).cloned() else {
+            self.track = None;
+            self.position_ms = 0;
+            self.decoded_frames.clear();
+            self.next_frame_index = 0;
+            return Ok(None);
+        };
+        self.next_frame_index += 1;
+        let processed = self.process_frame(frame)?;
+        if self.track.is_none() {
+            self.decoded_frames.clear();
+            self.next_frame_index = 0;
+        }
+        Ok(processed)
     }
 
     pub fn set_volume(&mut self, volume: u16) -> Result<(), AudioError> {
@@ -538,6 +577,8 @@ impl AudioPipeline for NativePlayer {
         self.track = Some(track);
         self.paused = false;
         self.position_ms = 0;
+        self.decoded_frames.clear();
+        self.next_frame_index = 0;
         Ok(())
     }
 
@@ -567,6 +608,19 @@ impl AudioPipeline for NativePlayer {
             return Err(AudioError::invalid("seek position exceeds track duration"));
         }
         self.position_ms = position_ms;
+        if !self.decoded_frames.is_empty() {
+            let mut elapsed_ms = 0_u64;
+            let mut index = 0;
+            while index < self.decoded_frames.len() && elapsed_ms < position_ms {
+                let frame = &self.decoded_frames[index];
+                let samples_per_channel = frame.samples.len() / usize::from(frame.channels);
+                elapsed_ms = elapsed_ms.saturating_add(
+                    (samples_per_channel as u64 * 1_000) / u64::from(frame.sample_rate),
+                );
+                index += 1;
+            }
+            self.next_frame_index = index;
+        }
         self.processor.reset_state();
         Ok(())
     }
@@ -575,6 +629,8 @@ impl AudioPipeline for NativePlayer {
         self.track = None;
         self.paused = false;
         self.position_ms = 0;
+        self.decoded_frames.clear();
+        self.next_frame_index = 0;
         self.processor.reset_state();
         Ok(())
     }
@@ -658,6 +714,27 @@ mod tests {
         player.seek(5_000).unwrap();
         assert_eq!(player.snapshot().position_ms, 5_000);
         player.stop().unwrap();
+        assert!(player.snapshot().track.is_none());
+    }
+
+    #[test]
+    fn native_player_yields_decoded_frames_until_track_ends() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "short".into(),
+                    title: "Short".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(40),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.5, 0.5], 2), frame(vec![0.25, 0.25], 2)],
+            )
+            .unwrap();
+        assert!(player.next_frame().unwrap().is_some());
+        assert!(player.next_frame().unwrap().is_some());
+        assert!(player.next_frame().unwrap().is_none());
         assert!(player.snapshot().track.is_none());
     }
 
