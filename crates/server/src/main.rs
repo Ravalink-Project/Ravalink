@@ -18,7 +18,10 @@ use ravalink_protocol::{
     WebSocketMessage, decode_track,
 };
 use serde::Deserialize;
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use sysinfo::System;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
