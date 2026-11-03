@@ -12,7 +12,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Load tracks | GET /v4/loadtracks | Direct HTTP(S) file URLs are fetched, probed, decoded and returned as encoded tracks; search providers and live streams pending |
 | Decode track | GET /v4/decodetrack | Lavaplayer track-info v1-v3 decoding; known built-in source payloads supported |
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
-| WebSocket | User-Id, Client-Name, Session-Id headers and ready event | Initial handshake only |
+| WebSocket | User-Id, Client-Name, Session-Id headers, ready and stats messages | Handshake, session resumption and periodic stats messages are implemented; player updates and track events are not emitted yet |
 | Session update | PATCH /v4/sessions/{sessionId} | Initial implementation |
 | Route planner | GET /v4/routeplanner/status, POST /free/address, POST /free/all | Disabled-state semantics implemented: status returns 204; free operations return 500 until a native route planner is available |
 | List players | GET /v4/sessions/{sessionId}/players | In-memory player state and per-session/guild native audio-player contexts |
