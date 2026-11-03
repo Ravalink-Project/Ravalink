@@ -14,6 +14,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
 | WebSocket | User-Id, Client-Name, Session-Id headers and ready event | Initial handshake only |
 | Session update | PATCH /v4/sessions/{sessionId} | Initial implementation |
+| Route planner | GET /v4/routeplanner/status, POST /free/address, POST /free/all | Disabled-state semantics implemented: status returns 204; free operations return 500 until a native route planner is available |
 | List players | GET /v4/sessions/{sessionId}/players | In-memory player state and per-session/guild native audio-player contexts |
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
 | Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP track resolution loads decoded PCM into NativePlayer; volume, filters, pause, seek and stop update native state; Discord voice output/events still absent |
