@@ -147,9 +147,9 @@ impl VoicePacketEncryptor {
                     AudioError::invalid(format!("nonce generation failed: {error}"))
                 })?;
                 let nonce = SalsaNonce::from_slice(&nonce_bytes);
-                let ciphertext = cipher
-                    .encrypt(nonce, plaintext)
-                    .map_err(|_| AudioError::invalid("XSalsa20-Poly1305 voice encryption failed"))?;
+                let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|_| {
+                    AudioError::invalid("XSalsa20-Poly1305 voice encryption failed")
+                })?;
                 output.extend_from_slice(&ciphertext);
                 output.extend_from_slice(&nonce_bytes);
             }
