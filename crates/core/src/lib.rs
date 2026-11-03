@@ -505,6 +505,60 @@ impl AudioPlayerStore {
         Ok(true)
     }
 
+    /// Run a player's encrypted UDP voice output at Discord's 20 ms cadence.
+    ///
+    /// The task ends when the track finishes, the player is removed, or the
+    /// caller signals shutdown. Paused players remain attached to the sender
+    /// and resume without rebuilding the negotiated voice pipeline.
+    pub async fn run_voice_output(
+        &self,
+        session_id: String,
+        guild_id: String,
+        mut pipeline: VoicePacketPipeline,
+        transport: DiscordUdpTransport,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(), AudioError> {
+        let mut interval = tokio::time::interval(Duration::from_millis(20));
+        interval.tick().await;
+
+        loop {
+            tokio::select! {
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        return Ok(());
+                    }
+                }
+                _ = interval.tick() => {
+                    let Some(snapshot) = self.snapshot(&session_id, &guild_id).await else {
+                        return Ok(());
+                    };
+                    if snapshot.track.is_none() {
+                        return Ok(());
+                    }
+                    if snapshot.paused {
+                        continue;
+                    }
+
+                    let sent = self
+                        .send_next_voice_packet(
+                            &session_id,
+                            &guild_id,
+                            &mut pipeline,
+                            &transport,
+                        )
+                        .await?;
+                    if !sent {
+                        let snapshot = self.snapshot(&session_id, &guild_id).await;
+                        if snapshot.is_some_and(|player| player.track.is_some() && player.paused) {
+                            continue;
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn next_rtp_packet(
         &self,
         session_id: &str,
