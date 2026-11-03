@@ -71,7 +71,7 @@ impl HttpSourceManager {
             ));
         }
 
-        let response = self
+        let mut response = self
             .client
             .get(url.clone())
             .send()
@@ -96,14 +96,18 @@ impl HttpSourceManager {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_owned();
-        let body = response
-            .bytes()
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|error| AudioError::invalid(format!("cannot read HTTP source: {error}")))?;
-        if body.len() > MAX_DOWNLOAD_BYTES {
-            return Err(AudioError::invalid(
-                "HTTP source exceeds the 128 MiB download limit",
-            ));
+            .map_err(|error| AudioError::invalid(format!("cannot read HTTP source: {error}")))?
+        {
+            if body.len().saturating_add(chunk.len()) > MAX_DOWNLOAD_BYTES {
+                return Err(AudioError::invalid(
+                    "HTTP source exceeds the 128 MiB download limit",
+                ));
+            }
+            body.extend_from_slice(&chunk);
         }
 
         let extension = url
