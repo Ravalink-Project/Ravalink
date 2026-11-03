@@ -100,6 +100,12 @@ async fn main() {
         .route("/version", get(version))
         .route("/v4/info", get(info_endpoint))
         .route("/v4/stats", get(stats))
+        .route("/v4/routeplanner/status", get(routeplanner_status))
+        .route(
+            "/v4/routeplanner/free/address",
+            post(routeplanner_free_address),
+        )
+        .route("/v4/routeplanner/free/all", post(routeplanner_free_all))
         .route("/v4/loadtracks", get(load_tracks))
         .route("/v4/decodetrack", get(decode_track_endpoint))
         .route("/v4/decodetracks", post(decode_tracks_endpoint))
@@ -217,6 +223,41 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
         },
     };
     Json(value).into_response()
+}
+
+async fn routeplanner_status(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn routeplanner_free_address(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Can't access disabled route planner",
+        "/v4/routeplanner/free/address",
+    )
+}
+
+async fn routeplanner_free_all(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Can't access disabled route planner",
+        "/v4/routeplanner/free/all",
+    )
 }
 
 async fn load_tracks(
