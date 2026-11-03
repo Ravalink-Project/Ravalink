@@ -398,43 +398,44 @@ async fn delete_player(
     }
     if state.sessions.get(&session_id).await.is_none() {
         return api_error(
-        if let Some(field) = invalid_player_field(fields) {
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            &format!("/v4/sessions/{session_id}"),
+        );
+    }
+    state.audio_players.remove(&session_id, &_guild_id).await;
+    state.players.remove(&session_id, &_guild_id).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn update_player(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((session_id, guild_id)): Path<(String, String)>,
+    Query(query): Query<PlayerUpdateQuery>,
+    Json(update): Json<serde_json::Value>,
+) -> Response {
+    if let Some(response) = authorization_failure(&headers, &state) {
+        return response;
+    }
+    let path = format!("/v4/sessions/{session_id}/players/{guild_id}");
+    if state.sessions.get(&session_id).await.is_none() {
+        return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
+    }
+    let Some(fields) = update.as_object() else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Player update must be a JSON object",
+            &path,
+        );
+    };
+
+    if let Some(field) = invalid_player_field(fields) {
         return api_error(
             StatusCode::BAD_REQUEST,
             &format!("Invalid value for player field '{field}'"),
             &path,
         );
-    } &path,
-        );
-    };
-
-    let field_validators: [PlayerFieldValidator; 7] = [
-        ("identifier", |value: &serde_json::Value| {
-            value.is_null() || value.is_string()
-        }),
-        ("encodedTrack", |value: &serde_json::Value| {
-            value.is_null() || value.is_string()
-        }),
-        ("track", |value: &serde_json::Value| {
-            value.is_null() || value.is_object()
-        }),
-        ("paused", |value| value.is_boolean()),
-        ("position", |value: &serde_json::Value| {
-            value.as_u64().is_some()
-        }),
-        ("volume", |value: &serde_json::Value| {
-            value.as_u64().is_some_and(|volume| volume <= 1_000)
-        }),
-        ("filters", |value| value.is_object()),
-    ];
-    for (field, valid) in field_validators {
-        if fields.get(field).is_some_and(|value| !valid(value)) {
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                &format!("Invalid value for player field '{field}'"),
-                &path,
-            );
-        }
     }
 
     let has_identifier = fields
