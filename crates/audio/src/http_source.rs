@@ -66,7 +66,9 @@ impl HttpSourceManager {
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         if !matches!(url.scheme(), "http" | "https") {
-            return Err(AudioError::invalid("only HTTP and HTTPS media URLs are supported"));
+            return Err(AudioError::invalid(
+                "only HTTP and HTTPS media URLs are supported",
+            ));
         }
 
         let response = self
@@ -76,13 +78,17 @@ impl HttpSourceManager {
             .await
             .map_err(|error| AudioError::invalid(format!("HTTP source request failed: {error}")))?
             .error_for_status()
-            .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
+            .map_err(|error| {
+                AudioError::invalid(format!("HTTP source returned an error: {error}"))
+            })?;
 
         if response
             .content_length()
             .is_some_and(|length| length > MAX_DOWNLOAD_BYTES as u64)
         {
-            return Err(AudioError::invalid("HTTP source exceeds the 128 MiB download limit"));
+            return Err(AudioError::invalid(
+                "HTTP source exceeds the 128 MiB download limit",
+            ));
         }
         let content_type = response
             .headers()
@@ -124,7 +130,9 @@ impl HttpSourceManager {
         if frames.iter().any(|frame| {
             frame.sample_rate != sample_rate || usize::from(frame.channels) != channels
         }) {
-            return Err(AudioError::invalid("HTTP source changes its PCM layout mid-track"));
+            return Err(AudioError::invalid(
+                "HTTP source changes its PCM layout mid-track",
+            ));
         }
 
         let frame_count: u64 = frames
@@ -137,7 +145,9 @@ impl HttpSourceManager {
             .map(|frame| frame.samples.len() * std::mem::size_of::<f32>())
             .sum();
         if pcm_bytes > self.max_cache_bytes {
-            return Err(AudioError::invalid("decoded HTTP source exceeds the PCM cache limit"));
+            return Err(AudioError::invalid(
+                "decoded HTTP source exceeds the PCM cache limit",
+            ));
         }
 
         let title = media_title(&url);
@@ -277,7 +287,8 @@ mod tests {
 
     #[test]
     fn derives_a_title_from_the_url_path() {
-        let url = reqwest::Url::parse("https://cdn.example/audio/demo-track.mp3?token=abc").unwrap();
+        let url =
+            reqwest::Url::parse("https://cdn.example/audio/demo-track.mp3?token=abc").unwrap();
         assert_eq!(media_title(&url), "demo-track.mp3");
     }
 }
