@@ -262,46 +262,19 @@ impl PlayerStore {
             .collect()
     }
 
-    pub async fn set_voice_state(
-        &self,
-        session_id: &str,
-        guild_id: &str,
-        voice_state: Option<DiscordVoiceState>,
-    ) {
-        let key = (session_id.to_owned(), guild_id.to_owned());
-        let mut states = self.voice_states.write().await;
-        if let Some(voice_state) = voice_state {
-            states.insert(key, voice_state);
-        } else {
-            states.remove(&key);
-        }
-    }
-
-    pub async fn voice_state(&self, session_id: &str, guild_id: &str) -> Option<DiscordVoiceState> {
-        self.voice_states
-            .read()
-            .await
-            .get(&(session_id.to_owned(), guild_id.to_owned()))
-            .cloned()
-    }
-
     pub async fn remove(&self, session_id: &str, guild_id: &str) -> bool {
-        let key = (session_id.to_owned(), guild_id.to_owned());
-        let removed_player = self.players.write().await.remove(&key).is_some();
-        let removed_voice = self.voice_states.write().await.remove(&key).is_some();
-        removed_player || removed_voice
+        self.players
+            .write()
+            .await
+            .remove(&(session_id.to_owned(), guild_id.to_owned()))
+            .is_some()
     }
 
     pub async fn remove_session(&self, session_id: &str) -> usize {
         let mut players = self.players.write().await;
         let before = players.len();
         players.retain(|(session, _), _| session != session_id);
-        let removed = before - players.len();
-        self.voice_states
-            .write()
-            .await
-            .retain(|(session, _), _| session != session_id);
-        removed
+        before - players.len()
     }
 
     pub async fn len(&self) -> usize {
@@ -549,19 +522,45 @@ impl AudioPlayerStore {
             .cloned()
     }
 
-    pub async fn remove(&self, session_id: &str, guild_id: &str) -> bool {
-        self.players
-            .write()
-            .await
-            .remove(&(session_id.to_owned(), guild_id.to_owned()))
-            .is_some()
+    pub async fn set_voice_state(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        voice_state: Option<DiscordVoiceState>,
+    ) {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let mut states = self.voice_states.write().await;
+        if let Some(voice_state) = voice_state {
+            states.insert(key, voice_state);
+        } else {
+            states.remove(&key);
+        }
     }
 
+    pub async fn voice_state(&self, session_id: &str, guild_id: &str) -> Option<DiscordVoiceState> {
+        self.voice_states
+            .read()
+            .await
+            .get(&(session_id.to_owned(), guild_id.to_owned()))
+            .cloned()
+    }
+
+    pub async fn remove(&self, session_id: &str, guild_id: &str) -> bool {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let removed_player = self.players.write().await.remove(&key).is_some();
+        let removed_voice = self.voice_states.write().await.remove(&key).is_some();
+        removed_player || removed_voice
+    }
     pub async fn remove_session(&self, session_id: &str) -> usize {
         let mut players = self.players.write().await;
         let before = players.len();
         players.retain(|(session, _), _| session != session_id);
-        before - players.len()
+        let removed = before - players.len();
+        self.voice_states
+            .write()
+            .await
+            .retain(|(session, _), _| session != session_id);
+        removed
     }
 
     pub async fn len(&self) -> usize {
