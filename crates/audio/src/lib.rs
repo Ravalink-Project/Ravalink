@@ -4,8 +4,8 @@
 //! processor operates on interleaved floating-point PCM frames. Codec and
 //! Discord voice transport adapters can feed frames into this layer.
 
-use ravalink_protocol::{Filters, Omissible};
 use crate::voice_pcm::VoicePcmPacketizer;
+use ravalink_protocol::{Filters, Omissible};
 
 pub mod http_source;
 pub mod voice_pcm;
@@ -813,10 +813,7 @@ mod tests {
                     duration_ms: Some(20),
                     is_stream: false,
                 },
-                vec![
-                    frame(vec![0.1; 960], 2),
-                    frame(vec![0.2; 960], 2),
-                ],
+                vec![frame(vec![0.1; 960], 2), frame(vec![0.2; 960], 2)],
             )
             .unwrap();
 
