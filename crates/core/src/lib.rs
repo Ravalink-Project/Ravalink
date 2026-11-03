@@ -431,6 +431,17 @@ impl AudioPlayerStore {
         }
     }
 
+    pub async fn set_end_time(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        end_time_ms: Option<u64>,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        let mut player = player.lock().await;
+        player.set_end_time(end_time_ms)
+    }
+
     pub async fn set_volume(
         &self,
         session_id: &str,

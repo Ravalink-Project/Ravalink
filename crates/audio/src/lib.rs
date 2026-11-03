@@ -488,6 +488,7 @@ pub struct NativePlayer {
     track: Option<AudioTrack>,
     paused: bool,
     position_ms: u64,
+    end_time_ms: Option<u64>,
     volume: u16,
     decoded_frames: Vec<PcmFrame>,
     next_frame_index: usize,
@@ -513,6 +514,7 @@ impl NativePlayer {
             track: None,
             paused: false,
             position_ms: 0,
+            end_time_ms: None,
             volume: 100,
             decoded_frames: Vec::new(),
             next_frame_index: 0,
@@ -613,6 +615,14 @@ impl NativePlayer {
         Ok(processed)
     }
 
+    pub fn set_end_time(&mut self, end_time_ms: Option<u64>) -> Result<(), AudioError> {
+        if end_time_ms.is_some_and(|end_time| end_time == 0) {
+            return Err(AudioError::invalid("end time must be greater than zero"));
+        }
+        self.end_time_ms = end_time_ms;
+        Ok(())
+    }
+
     pub fn set_volume(&mut self, volume: u16) -> Result<(), AudioError> {
         if volume > 1_000 {
             return Err(AudioError::invalid(
@@ -635,15 +645,18 @@ impl NativePlayer {
         let frame_count = frame.samples.len() / usize::from(frame.channels);
         let elapsed_ms = (frame_count as u64 * 1_000) / u64::from(frame.sample_rate);
         self.position_ms = self.position_ms.saturating_add(elapsed_ms);
-        if self
-            .track
-            .as_ref()
-            .and_then(|track| track.duration_ms)
-            .is_some_and(|duration| self.position_ms >= duration)
-        {
+        let effective_end = self.track.as_ref().and_then(|track| {
+            match (track.duration_ms, self.end_time_ms) {
+                (Some(duration), Some(end_time)) => Some(duration.min(end_time)),
+                (Some(duration), None) => Some(duration),
+                (None, end_time) => end_time,
+            }
+        });
+        if effective_end.is_some_and(|end_time| self.position_ms >= end_time) {
             self.track = None;
             self.paused = false;
             self.position_ms = 0;
+            self.end_time_ms = None;
         }
         Ok(Some(frame))
     }
@@ -655,6 +668,7 @@ impl AudioPipeline for NativePlayer {
         self.track = Some(track);
         self.paused = false;
         self.position_ms = 0;
+        self.end_time_ms = None;
         self.decoded_frames.clear();
         self.next_frame_index = 0;
         self.voice_packetizer.clear();
@@ -686,6 +700,7 @@ impl AudioPipeline for NativePlayer {
         if track
             .duration_ms
             .is_some_and(|duration| position_ms > duration)
+            || self.end_time_ms.is_some_and(|end_time| position_ms > end_time)
         {
             return Err(AudioError::invalid("seek position exceeds track duration"));
         }
@@ -715,6 +730,7 @@ impl AudioPipeline for NativePlayer {
         self.track = None;
         self.paused = false;
         self.position_ms = 0;
+        self.end_time_ms = None;
         self.decoded_frames.clear();
         self.next_frame_index = 0;
         self.voice_packetizer.clear();
@@ -939,6 +955,27 @@ mod tests {
         assert_eq!(packet[1], 120);
         assert_eq!(&packet[8..12], &0x1234_5678_u32.to_be_bytes());
         assert!(packet.len() > crate::rtp::RTP_HEADER_BYTES);
+    }
+
+    #[test]
+    fn end_time_stops_playback_before_the_full_track_duration() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "long".into(),
+                    title: "Long".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(10_000),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.1; 960], 2), frame(vec![0.1; 960], 2)],
+            )
+            .unwrap();
+        player.set_end_time(Some(10)).unwrap();
+
+        assert!(player.next_frame().unwrap().is_some());
+        assert!(player.snapshot().track.is_none());
     }
 
     #[test]

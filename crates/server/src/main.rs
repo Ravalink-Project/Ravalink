@@ -466,6 +466,17 @@ async fn update_player(
         }
     }
 
+    if fields.contains_key("endTime") {
+        let end_time = fields.get("endTime").and_then(serde_json::Value::as_u64);
+        if let Err(error) = state
+            .audio_players
+            .set_end_time(&session_id, &guild_id, end_time)
+            .await
+        {
+            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+        }
+    }
+
     if let Some(volume) = fields.get("volume") {
         let Some(volume) = volume.as_u64().and_then(|value| u16::try_from(value).ok()) else {
             return api_error(
