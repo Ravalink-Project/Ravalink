@@ -12,6 +12,10 @@ use axum::{
 };
 use ravalink_audio::{AudioTrack, HttpSourceManager, PcmFrame};
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
+use ravalink_plugin_api::PluginRegistry;
+use ravalink_plugin_lavasearch::LavaSearchPlugin;
+use ravalink_plugin_lavasrc::LavaSrcPlugin;
+use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, PlayerStateUpdate,
     PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage, Track,
@@ -33,6 +37,7 @@ struct AppState {
     players: PlayerStore,
     audio_players: AudioPlayerStore,
     http_sources: HttpSourceManager,
+    plugins: PluginRegistry,
     metrics_enabled: bool,
     player_update_interval: u64,
     system: Arc<tokio::sync::Mutex<System>>,
@@ -97,6 +102,14 @@ fn invalid_player_field(
     })
 }
 
+fn built_in_plugins() -> PluginRegistry {
+    let mut plugins = PluginRegistry::default();
+    plugins.register(YouTubePlugin);
+    plugins.register(LavaSrcPlugin);
+    plugins.register(LavaSearchPlugin);
+    plugins
+}
+
 #[tokio::main]
 async fn main() {
     let config = config::Config::load().expect("failed to load RavaLink configuration");
@@ -121,6 +134,7 @@ async fn main() {
             config.audio.max_source_download_bytes,
             config.audio.max_decoded_cache_bytes,
         ),
+        plugins: built_in_plugins(),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
         system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
@@ -226,7 +240,15 @@ async fn info_endpoint(headers: HeaderMap, State(state): State<AppState>) -> Res
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
-    Json(ServerInfo::default()).into_response()
+    let mut info = ServerInfo::default();
+    info.plugins = state.plugins.infos();
+    info.source_managers.extend([
+        "youtube".to_owned(),
+        "spotify".to_owned(),
+        "applemusic".to_owned(),
+        "deezer".to_owned(),
+    ]);
+    Json(info).into_response()
 }
 
 async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
@@ -974,6 +996,7 @@ mod server_api_tests {
             players: PlayerStore::default(),
             audio_players: AudioPlayerStore::default(),
             http_sources: HttpSourceManager::default(),
+            plugins: built_in_plugins(),
             metrics_enabled: false,
             player_update_interval: 5,
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),

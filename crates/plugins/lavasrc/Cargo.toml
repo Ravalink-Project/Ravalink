@@ -1,0 +1,8 @@
+[package]
+name = "ravalink-plugin-lavasrc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ravalink-plugin-api = { path = "../plugin-api" }

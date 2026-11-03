@@ -5,6 +5,10 @@ members = [
     "crates/core",
     "crates/audio",
     "crates/server",
+    "crates/plugins/plugin-api",
+    "crates/plugins/youtube",
+    "crates/plugins/lavasrc",
+    "crates/plugins/lavasearch",
 ]
 
 [workspace.package]
@@ -15,6 +19,7 @@ repository = "https://github.com/Ravalink-Project/Ravalink"
 
 [workspace.dependencies]
 axum = { version = "0.8", features = ["ws", "macros"] }
+async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
