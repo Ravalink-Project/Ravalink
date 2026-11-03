@@ -3,9 +3,7 @@
 //! This module wraps the upstream Rust `davey` MLS implementation and exposes
 //! the state transitions needed by the Discord voice gateway adapter.
 
-use davey::{
-    CommitWelcome, DAVE_PROTOCOL_VERSION, DaveSession, ProposalsOperationType,
-};
+use davey::{CommitWelcome, DAVE_PROTOCOL_VERSION, DaveSession, ProposalsOperationType};
 use std::{borrow::Cow, num::NonZeroU16};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
