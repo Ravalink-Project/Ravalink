@@ -22,7 +22,7 @@ over Opus/WebM so the current Symphonia decoder can process the stream.
 
 ## LavaSrc
 
-Track links from Spotify, Apple Music and Deezer are resolved to provider metadata,
+Spotify URLs and `spotify:` URIs, plus Apple Music and Deezer links, are resolved to provider metadata,
 then matched against YouTube for a playable audio stream. Track identity and metadata
 remain associated with the original provider in the returned Lavalink track. Deezer
 albums, playlists and artist top tracks are expanded into playable tracks. Spotify

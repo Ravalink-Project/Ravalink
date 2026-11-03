@@ -73,6 +73,21 @@ impl Default for LavaSrcPlugin {
 
 impl LavaSrcPlugin {
     pub fn parse_identifier(identifier: &str) -> Option<ProviderIdentifier> {
+        if let Some(spotify_uri) = identifier.strip_prefix("spotify:") {
+            let (content_type, id) = spotify_uri.split_once(':')?;
+            if !matches!(content_type, "track" | "album" | "playlist" | "artist")
+                || id.is_empty()
+                || !id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            {
+                return None;
+            }
+            return Some(ProviderIdentifier {
+                provider: MusicProvider::Spotify,
+                content_type: content_type.to_owned(),
+                id: id.to_owned(),
+            });
+        }
+
         let url = split_url(identifier)?;
         let segments: Vec<&str> = url
             .path
@@ -821,6 +836,15 @@ mod tests {
         let playlist =
             LavaSrcPlugin::parse_identifier("https://open.spotify.com/playlist/abc123").unwrap();
         assert_eq!(playlist.content_type, "playlist");
+    }
+
+    #[test]
+    fn parses_spotify_uris_as_well_as_web_urls() {
+        let parsed =
+            LavaSrcPlugin::parse_identifier("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
+        assert_eq!(parsed.provider, MusicProvider::Spotify);
+        assert_eq!(parsed.content_type, "track");
+        assert_eq!(parsed.id, "4uLU6hMCjMI75M1A2tKUQC");
     }
 
     #[test]
