@@ -551,6 +551,17 @@ impl NativePlayer {
     }
 
     /// Return the next decoded frame after applying the player's DSP chain.
+    /// Build the next unencrypted RTP packet from the native Opus encoder.
+    pub fn next_rtp_packet(
+        &mut self,
+        packetizer: &mut crate::rtp::RtpPacketizer,
+    ) -> Result<Option<Vec<u8>>, AudioError> {
+        let Some(opus_packet) = self.next_opus_packet()? else {
+            return Ok(None);
+        };
+        packetizer.packetize(&opus_packet).map(Some)
+    }
+
     /// Encode the next decoded frame as a native Opus packet.
     pub fn next_opus_packet(&mut self) -> Result<Option<Vec<u8>>, AudioError> {
         let Some(frame) = self.next_voice_frame()? else {
@@ -904,6 +915,30 @@ mod tests {
         assert!(!packet.is_empty());
         assert!(packet.len() <= 4_000);
         assert!(player.next_opus_packet().unwrap().is_none());
+    }
+
+    #[test]
+    fn native_player_emits_rtp_packets_from_decoded_audio() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "short".into(),
+                    title: "Short".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(20),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.1; 960], 2), frame(vec![0.1; 960], 2)],
+            )
+            .unwrap();
+        let mut packetizer = crate::rtp::RtpPacketizer::new(0x1234_5678, 1, 960);
+
+        let packet = player.next_rtp_packet(&mut packetizer).unwrap().unwrap();
+        assert_eq!(packet[0], 0x80);
+        assert_eq!(packet[1], 120);
+        assert_eq!(&packet[8..12], &0x1234_5678_u32.to_be_bytes());
+        assert!(packet.len() > crate::rtp::RTP_HEADER_BYTES);
     }
 
     #[test]
