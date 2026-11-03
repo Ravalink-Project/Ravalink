@@ -42,10 +42,7 @@ impl DiscordUdpTransport {
             .await
             .map_err(|error| AudioError::invalid(format!("voice UDP connect failed: {error}")))?;
 
-        let mut request = [0_u8; DISCOVERY_PACKET_BYTES];
-        request[..2].copy_from_slice(&DISCOVERY_REQUEST_TYPE.to_be_bytes());
-        request[2..4].copy_from_slice(&70_u16.to_be_bytes());
-        request[4..8].copy_from_slice(&ssrc.to_be_bytes());
+        let request = discovery_request(ssrc);
         socket.send(&request).await.map_err(|error| {
             AudioError::invalid(format!("voice UDP discovery send failed: {error}"))
         })?;
@@ -100,6 +97,14 @@ impl DiscordUdpTransport {
             .await
             .map_err(|error| AudioError::invalid(format!("voice UDP packet send failed: {error}")))
     }
+}
+
+fn discovery_request(ssrc: u32) -> [u8; DISCOVERY_PACKET_BYTES] {
+    let mut packet = [0_u8; DISCOVERY_PACKET_BYTES];
+    packet[..2].copy_from_slice(&DISCOVERY_REQUEST_TYPE.to_be_bytes());
+    packet[2..4].copy_from_slice(&70_u16.to_be_bytes());
+    packet[4..8].copy_from_slice(&ssrc.to_be_bytes());
+    packet
 }
 
 fn parse_discovery_response(
@@ -161,6 +166,14 @@ mod tests {
         packet[8..8 + address.len()].copy_from_slice(address.as_bytes());
         packet[72..74].copy_from_slice(&port.to_be_bytes());
         packet
+    }
+
+    #[test]
+    fn builds_discord_voice_ip_discovery_request() {
+        let packet = discovery_request(0x1234_5678);
+        assert_eq!(packet.len(), 74);
+        assert_eq!(&packet[..8], &[0, 1, 0, 70, 0x12, 0x34, 0x56, 0x78]);
+        assert!(packet[8..].iter().all(|byte| *byte == 0));
     }
 
     #[test]
