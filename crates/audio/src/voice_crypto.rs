@@ -9,9 +9,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
 };
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use crypto_secretbox::{
-    Nonce as SalsaNonce, XSalsa20Poly1305,
-};
+use crypto_secretbox::{Nonce as SalsaNonce, XSalsa20Poly1305};
 
 const RTP_HEADER_BYTES: usize = 12;
 
@@ -42,18 +40,16 @@ pub struct VoicePacketEncryptor {
 impl VoicePacketEncryptor {
     pub fn new(secret_key: [u8; 32], mode: VoiceEncryptionMode) -> Result<Self, AudioError> {
         let cipher = match mode {
-            VoiceEncryptionMode::AeadAes256GcmRtpSize => VoiceCipher::Aes256Gcm(
-                Aes256Gcm::new_from_slice(&secret_key).map_err(|error| {
+            VoiceEncryptionMode::AeadAes256GcmRtpSize => {
+                VoiceCipher::Aes256Gcm(Aes256Gcm::new_from_slice(&secret_key).map_err(|error| {
                     AudioError::invalid(format!("invalid AES-256-GCM voice key: {error}"))
+                })?)
+            }
+            VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize => VoiceCipher::XChaCha20Poly1305(
+                XChaCha20Poly1305::new_from_slice(&secret_key).map_err(|error| {
+                    AudioError::invalid(format!("invalid XChaCha20 voice key: {error}"))
                 })?,
             ),
-            VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize => {
-                VoiceCipher::XChaCha20Poly1305(
-                    XChaCha20Poly1305::new_from_slice(&secret_key).map_err(|error| {
-                        AudioError::invalid(format!("invalid XChaCha20 voice key: {error}"))
-                    })?,
-                )
-            }
             _ => VoiceCipher::Xsalsa20Poly1305(
                 XSalsa20Poly1305::new_from_slice(&secret_key).map_err(|error| {
                     AudioError::invalid(format!("invalid XSalsa20 voice key: {error}"))
@@ -113,7 +109,9 @@ impl VoicePacketEncryptor {
                             aad: header,
                         },
                     )
-                    .map_err(|_| AudioError::invalid("XChaCha20-Poly1305 voice encryption failed"))?;
+                    .map_err(|_| {
+                        AudioError::invalid("XChaCha20-Poly1305 voice encryption failed")
+                    })?;
                 output.extend_from_slice(&ciphertext);
                 output.extend_from_slice(&self.nonce_counter.to_be_bytes());
                 self.advance_nonce()?;
@@ -124,9 +122,9 @@ impl VoicePacketEncryptor {
                 | VoiceEncryptionMode::Xsalsa20Poly1305LiteRtpSize,
             ) => {
                 let nonce = SalsaNonce::from_slice(&nonce_bytes::<24>(self.nonce_counter));
-                let ciphertext = cipher
-                    .encrypt(nonce, plaintext)
-                    .map_err(|_| AudioError::invalid("XSalsa20-Poly1305 voice encryption failed"))?;
+                let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|_| {
+                    AudioError::invalid("XSalsa20-Poly1305 voice encryption failed")
+                })?;
                 output.extend_from_slice(&ciphertext);
                 output.extend_from_slice(&self.nonce_counter.to_be_bytes());
                 self.advance_nonce()?;
@@ -135,9 +133,9 @@ impl VoicePacketEncryptor {
                 let mut nonce_bytes = [0_u8; 24];
                 nonce_bytes[..RTP_HEADER_BYTES].copy_from_slice(header);
                 let nonce = SalsaNonce::from_slice(&nonce_bytes);
-                let ciphertext = cipher
-                    .encrypt(nonce, plaintext)
-                    .map_err(|_| AudioError::invalid("XSalsa20-Poly1305 voice encryption failed"))?;
+                let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|_| {
+                    AudioError::invalid("XSalsa20-Poly1305 voice encryption failed")
+                })?;
                 output.extend_from_slice(&ciphertext);
             }
             (
@@ -257,11 +255,9 @@ mod tests {
     fn xchacha20_poly1305_rtpsize_round_trips_and_appends_nonce_counter() {
         let key = [3; 32];
         let packet = rtp_packet();
-        let mut encryptor = VoicePacketEncryptor::new(
-            key,
-            VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize,
-        )
-        .unwrap();
+        let mut encryptor =
+            VoicePacketEncryptor::new(key, VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize)
+                .unwrap();
         let encrypted = encryptor.encrypt_rtp_packet(&packet).unwrap();
 
         assert_eq!(&encrypted[..12], &packet[..12]);
@@ -332,11 +328,9 @@ mod tests {
 
     #[test]
     fn rejects_non_rtp_input() {
-        let mut encryptor = VoicePacketEncryptor::new(
-            [1; 32],
-            VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize,
-        )
-        .unwrap();
+        let mut encryptor =
+            VoicePacketEncryptor::new([1; 32], VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize)
+                .unwrap();
         assert!(encryptor.encrypt_rtp_packet(&[1, 2, 3]).is_err());
     }
 }
