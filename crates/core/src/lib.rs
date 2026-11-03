@@ -1,6 +1,8 @@
 //! Runtime state shared by the protocol and audio layers.
 
-use ravalink_audio::{AudioError, AudioPipeline, AudioTrack, NativePlayer, PcmFrame, PlayerSnapshot};
+use ravalink_audio::{
+    AudioError, AudioPipeline, AudioTrack, NativePlayer, PcmFrame, PlayerSnapshot,
+};
 use ravalink_protocol::Filters;
 use serde_json::{Value, json};
 use std::{

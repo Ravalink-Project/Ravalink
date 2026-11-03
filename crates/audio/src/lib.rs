@@ -495,7 +495,9 @@ impl NativePlayer {
 
     pub fn set_volume(&mut self, volume: u16) -> Result<(), AudioError> {
         if volume > 1_000 {
-            return Err(AudioError::invalid("player volume must be between 0 and 1000"));
+            return Err(AudioError::invalid(
+                "player volume must be between 0 and 1000",
+            ));
         }
         self.volume = volume;
         Ok(())
