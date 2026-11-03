@@ -168,6 +168,44 @@ mod tests {
         packet
     }
 
+    #[tokio::test]
+    async fn discovers_voice_endpoint_and_sends_encrypted_rtp_datagrams() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote = server.local_addr().unwrap();
+        let ssrc = 0x1234_5678_u32;
+
+        let server_task = tokio::spawn(async move {
+            let mut request = [0_u8; DISCOVERY_PACKET_BYTES];
+            let (request_len, peer) = server.recv_from(&mut request).await.unwrap();
+            assert_eq!(request_len, DISCOVERY_PACKET_BYTES);
+            assert_eq!(request, discovery_request(ssrc));
+
+            let response = response(ssrc, "203.0.113.42", 50_000);
+            server.send_to(&response, peer).await.unwrap();
+
+            let mut packet = [0_u8; 128];
+            let (packet_len, _) = server.recv_from(&mut packet).await.unwrap();
+            packet[..packet_len].to_vec()
+        });
+
+        let transport = DiscordUdpTransport::discover(remote, ssrc, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(transport.ssrc(), ssrc);
+        assert_eq!(transport.external_address(), "203.0.113.42");
+        assert_eq!(transport.external_port(), 50_000);
+
+        let mut encrypted_packet = vec![0_u8; 13];
+        encrypted_packet[0] = 0x80;
+        encrypted_packet[12] = 0xaa;
+        assert_eq!(
+            transport.send_voice_packet(&encrypted_packet).await.unwrap(),
+            encrypted_packet.len()
+        );
+
+        assert_eq!(server_task.await.unwrap(), encrypted_packet);
+    }
+
     #[test]
     fn builds_discord_voice_ip_discovery_request() {
         let packet = discovery_request(0x1234_5678);
