@@ -10,7 +10,7 @@ use ravalink_protocol::{Filters, Omissible};
 pub mod http_source;
 pub mod voice_pcm;
 pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
-pub use voice_pcm::{VOICE_FRAME_SAMPLES_PER_CHANNEL, VoicePcmPacketizer, normalize_for_voice};
+pub use voice_pcm::{VOICE_FRAME_SAMPLES_PER_CHANNEL, normalize_for_voice};
 
 /// Interleaved floating-point PCM audio.
 #[derive(Debug, Clone, PartialEq)]
