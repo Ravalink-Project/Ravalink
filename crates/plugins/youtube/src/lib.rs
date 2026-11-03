@@ -149,9 +149,7 @@ impl YouTubePlugin {
                     })
             })
             .and_then(|format| format.get("url").and_then(Value::as_str))
-            .ok_or_else(|| {
-                PluginError::new("youtube", "no playable audio format was returned")
-            })?;
+            .ok_or_else(|| PluginError::new("youtube", "no playable audio format was returned"))?;
         track.plugin_info = json!({
             "streamUrl": stream_url,
             "provider": "invidious",
@@ -218,10 +216,7 @@ impl RavaLinkPlugin for YouTubePlugin {
         Self::parse_identifier(identifier).is_some() || Self::is_search(identifier)
     }
 
-    async fn load_tracks(
-        &self,
-        identifier: &str,
-    ) -> Result<Option<PluginLoadResult>, PluginError> {
+    async fn load_tracks(&self, identifier: &str) -> Result<Option<PluginLoadResult>, PluginError> {
         if let Some(query) = Self::search_query(identifier) {
             return self.search(query).await.map(Some);
         }
