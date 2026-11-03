@@ -790,8 +790,7 @@ async fn resolve_player_track(
             .ok_or_else(|| "plugin track has no source URI".to_owned())?;
         let (mut plugin_track, frames) = resolve_plugin_audio_track(state, &uri).await?;
         plugin_track.info.position = position;
-        plugin_track.encoded =
-            encode_track(&plugin_track).map_err(|error| error.message)?;
+        plugin_track.encoded = encode_track(&plugin_track).map_err(|error| error.message)?;
         return Ok((plugin_track, frames));
     }
     if track.info.source_name != "http" {

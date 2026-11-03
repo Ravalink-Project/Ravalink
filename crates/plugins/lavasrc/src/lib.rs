@@ -302,7 +302,8 @@ impl LavaSrcPlugin {
         parsed: &ProviderIdentifier,
     ) -> Result<Track, PluginError> {
         let metadata = self.resolve_metadata(identifier, parsed).await?;
-        self.match_external_track(identifier, parsed, metadata).await
+        self.match_external_track(identifier, parsed, metadata)
+            .await
     }
 
     async fn resolve_deezer_collection(
@@ -326,7 +327,10 @@ impl LavaSrcPlugin {
             .send()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("Deezer collection request failed: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("Deezer collection request failed: {error}"),
+                )
             })?
             .error_for_status()
             .map_err(|error| {
@@ -335,7 +339,10 @@ impl LavaSrcPlugin {
             .json()
             .await
             .map_err(|error| {
-                PluginError::new("lavasrc", format!("invalid Deezer collection response: {error}"))
+                PluginError::new(
+                    "lavasrc",
+                    format!("invalid Deezer collection response: {error}"),
+                )
             })?;
         if data.get("error").is_some() {
             return Err(PluginError::new(
