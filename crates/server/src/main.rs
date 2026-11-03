@@ -362,17 +362,18 @@ async fn update_player(
         );
     };
 
-    for (field, valid) in [
-        ("identifier", |value: &serde_json::Value| value.is_null() || value.is_string()),
-        ("encodedTrack", |value: &serde_json::Value| value.is_null() || value.is_string()),
-        ("track", |value: &serde_json::Value| value.is_null() || value.is_object()),
-        ("paused", |value: &serde_json::Value| value.is_boolean()),
-        ("position", |value: &serde_json::Value| value.as_u64().is_some()),
-        ("volume", |value: &serde_json::Value| value
+    let field_validators: [(&str, fn(&serde_json::Value) -> bool); 7] = [
+        ("identifier", |value| value.is_null() || value.is_string()),
+        ("encodedTrack", |value| value.is_null() || value.is_string()),
+        ("track", |value| value.is_null() || value.is_object()),
+        ("paused", |value| value.is_boolean()),
+        ("position", |value| value.as_u64().is_some()),
+        ("volume", |value| value
             .as_u64()
             .is_some_and(|volume| volume <= 1_000)),
-        ("filters", |value: &serde_json::Value| value.is_object()),
-    ] {
+        ("filters", |value| value.is_object()),
+    ];
+    for (field, valid) in field_validators {
         if fields.get(field).is_some_and(|value| !valid(value)) {
             return api_error(
                 StatusCode::BAD_REQUEST,
