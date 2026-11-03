@@ -121,7 +121,8 @@ impl VoicePacketEncryptor {
                 VoiceEncryptionMode::Xsalsa20Poly1305Lite
                 | VoiceEncryptionMode::Xsalsa20Poly1305LiteRtpSize,
             ) => {
-                let nonce = SalsaNonce::from_slice(&nonce_bytes::<24>(self.nonce_counter));
+                let nonce_bytes = nonce_bytes::<24>(self.nonce_counter);
+                let nonce = SalsaNonce::from_slice(&nonce_bytes);
                 let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|_| {
                     AudioError::invalid("XSalsa20-Poly1305 voice encryption failed")
                 })?;
