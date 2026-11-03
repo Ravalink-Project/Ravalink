@@ -19,10 +19,10 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP track resolution loads decoded PCM into NativePlayer; volume, filters, pause, seek and stop update native state; Discord voice output/events still absent |
 | Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
 | Audio sources | Search, resolve, stream, errors | Bounded direct HTTP(S) file resolver only; configurable download cap (128 MiB default) and decoded PCM cache (256 MiB default); no search providers or live stream support |
-| Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and REST-to-NativePlayer loading/control; bounded PCM frame queue; voice PCM normalization to 48 kHz stereo and 20 ms packetization; no continuous source streaming, time-stretch, Opus encoding or RTP transport yet |
-| Discord voice | Gateway voice handshake, DAVE, RTP, encryption | Not implemented |
+| Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and REST-to-NativePlayer loading/control; bounded HTTP download and decoded-PCM cache; 48 kHz stereo resampling and 20 ms packetization; native Opus encoding; RTP v2 sequence/timestamp construction |
+| Discord voice | Gateway voice handshake, DAVE, RTP, encryption | RTP packet construction and legacy XSalsa20-Poly1305 normal/suffix/lite encryption primitives are implemented and tested; Discord UDP discovery/transport, gateway voice handshake, speaking state and DAVE are not implemented; voice state is stored from player updates |
 | Plugins | Native extension API | Not implemented |
-| Prometheus | Configurable metrics endpoint | Not implemented |
+| Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players and decoded PCM cache byte gauges |
 
 ## Acceptance rule
 
@@ -32,7 +32,7 @@ and failure paths and the same test scenario has been checked against Lavalink v
 
 ## Track codec limitations
 
-The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
+The native audio path currently buffers and decodes a complete direct HTTP(S) file before playback. It is not a continuous streaming engine; large or live sources are intentionally unsupported until the streaming decoder and back-pressure path are implemented.\n\nThe codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are
 known to contain no extra data, plus the HTTP/local probing descriptor. Plugin
 source managers with custom binary payloads are rejected explicitly rather
