@@ -97,9 +97,10 @@ impl LavaSrcPlugin {
                 }
             }
             MusicProvider::Deezer => {
-                let kind = *segments.first()?;
-                let id = *segments.get(1)?;
-                (kind, id)
+                let kind_index = segments
+                    .iter()
+                    .position(|part| matches!(*part, "track" | "album" | "playlist" | "artist"))?;
+                (*segments.get(kind_index)?, *segments.get(kind_index + 1)?)
             }
         };
 
@@ -262,21 +263,12 @@ impl LavaSrcPlugin {
         })
     }
 
-    async fn resolve_track(
+    async fn match_external_track(
         &self,
         identifier: &str,
         parsed: &ProviderIdentifier,
+        metadata: ExternalTrack,
     ) -> Result<Track, PluginError> {
-        if parsed.content_type != "track" {
-            return Err(PluginError::new(
-                "lavasrc",
-                format!(
-                    "{} collections are not implemented yet",
-                    parsed.content_type
-                ),
-            ));
-        }
-        let metadata = self.resolve_metadata(identifier, parsed).await?;
         let query = format!("{} {}", metadata.title, metadata.author);
         let candidates = self.youtube.search_tracks(&query).await?;
         let candidate = candidates
@@ -302,6 +294,124 @@ impl LavaSrcPlugin {
             encode_track(&matched).map_err(|error| PluginError::new("lavasrc", error.message))?;
         matched.plugin_info["matchedSource"] = json!("youtube");
         Ok(matched)
+    }
+
+    async fn resolve_track(
+        &self,
+        identifier: &str,
+        parsed: &ProviderIdentifier,
+    ) -> Result<Track, PluginError> {
+        let metadata = self.resolve_metadata(identifier, parsed).await?;
+        self.match_external_track(identifier, parsed, metadata).await
+    }
+
+    async fn resolve_deezer_collection(
+        &self,
+        parsed: &ProviderIdentifier,
+    ) -> Result<PluginLoadResult, PluginError> {
+        let endpoint = match parsed.content_type.as_str() {
+            "album" => format!("https://api.deezer.com/album/{}", parsed.id),
+            "playlist" => format!("https://api.deezer.com/playlist/{}", parsed.id),
+            "artist" => format!("https://api.deezer.com/artist/{}/top?limit=15", parsed.id),
+            _ => {
+                return Err(PluginError::new(
+                    "lavasrc",
+                    "unsupported Deezer collection type",
+                ));
+            }
+        };
+        let data: Value = self
+            .client
+            .get(endpoint)
+            .send()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Deezer collection request failed: {error}"))
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Deezer returned an error: {error}"))
+            })?
+            .json()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("invalid Deezer collection response: {error}"))
+            })?;
+        if data.get("error").is_some() {
+            return Err(PluginError::new(
+                "lavasrc",
+                "Deezer could not resolve this collection",
+            ));
+        }
+        let items = if parsed.content_type == "artist" {
+            data.get("data").and_then(Value::as_array)
+        } else {
+            data.get("tracks")
+                .and_then(|tracks| tracks.get("data"))
+                .and_then(Value::as_array)
+        }
+        .ok_or_else(|| PluginError::new("lavasrc", "Deezer collection contains no track list"))?;
+        let name = data
+            .get("title")
+            .or_else(|| data.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("Deezer collection")
+            .to_owned();
+
+        let mut tracks = Vec::new();
+        for item in items.iter().take(15) {
+            let id = item
+                .get("id")
+                .and_then(Value::as_u64)
+                .map(|value| value.to_string())
+                .or_else(|| item.get("id").and_then(Value::as_str).map(str::to_owned));
+            let Some(id) = id else {
+                continue;
+            };
+            let metadata = ExternalTrack {
+                title: item
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown title")
+                    .to_owned(),
+                author: item
+                    .get("artist")
+                    .and_then(|artist| artist.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown")
+                    .to_owned(),
+                duration_ms: item
+                    .get("duration")
+                    .and_then(Value::as_u64)
+                    .map(|seconds| seconds.saturating_mul(1_000)),
+                artwork_url: item
+                    .get("album")
+                    .and_then(|album| album.get("cover_xl"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                isrc: item.get("isrc").and_then(Value::as_str).map(str::to_owned),
+            };
+            let track_identifier = ProviderIdentifier {
+                provider: MusicProvider::Deezer,
+                content_type: "track".to_owned(),
+                id: id.clone(),
+            };
+            let uri = format!("https://www.deezer.com/track/{id}");
+            if let Ok(track) = self
+                .match_external_track(&uri, &track_identifier, metadata)
+                .await
+            {
+                tracks.push(track);
+            }
+        }
+
+        Ok(PluginLoadResult::new(
+            PluginLoadType::Playlist,
+            json!({
+                "info": {"name": name, "selectedTrack": -1},
+                "tracks": tracks,
+            }),
+        ))
     }
 }
 
@@ -332,11 +442,23 @@ impl RavaLinkPlugin for LavaSrcPlugin {
         let Some(parsed) = Self::parse_identifier(identifier) else {
             return Ok(None);
         };
-        let track = self.resolve_track(identifier, &parsed).await?;
-        Ok(Some(PluginLoadResult::new(
-            PluginLoadType::Track,
-            serde_json::to_value(track).expect("track serializes"),
-        )))
+        if parsed.content_type == "track" {
+            let track = self.resolve_track(identifier, &parsed).await?;
+            return Ok(Some(PluginLoadResult::new(
+                PluginLoadType::Track,
+                serde_json::to_value(track).expect("track serializes"),
+            )));
+        }
+        if parsed.provider == MusicProvider::Deezer {
+            return self.resolve_deezer_collection(&parsed).await.map(Some);
+        }
+        Err(PluginError::new(
+            "lavasrc",
+            format!(
+                "{} collection resolution is not available for this provider yet",
+                parsed.content_type
+            ),
+        ))
     }
 }
 

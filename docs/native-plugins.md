@@ -6,7 +6,7 @@ server. They are separate crates and share the `ravalink-plugin-api` contract.
 | Crate | Lavalink equivalent | Current implementation |
 |---|---|---|
 | `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, AAC audio-format selection, timestamped starts, video search and playlist expansion |
-| `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer track metadata with YouTube audio matching |
+| `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer track metadata with YouTube audio matching; Deezer album, playlist and artist-top expansion |
 | `ravalink-plugin-lavasearch` | LavaSearch | YouTube, Spotify, Apple Music and Deezer track search; Deezer album, artist and playlist discovery |
 
 The crates are separate so they can be developed, tested, configured and eventually
@@ -24,9 +24,9 @@ over Opus/WebM so the current Symphonia decoder can process the stream.
 
 Track links from Spotify, Apple Music and Deezer are resolved to provider metadata,
 then matched against YouTube for a playable audio stream. Track identity and metadata
-remain associated with the original provider in the returned Lavalink track. Album,
-artist and playlist expansion, provider-native collection resolution and more advanced
-matching still need implementation.
+remain associated with the original provider in the returned Lavalink track. Deezer
+albums, playlists and artist top tracks are expanded into playable tracks. Spotify and
+Apple Music collection expansion remain to be implemented.
 
 ## LavaSearch
 

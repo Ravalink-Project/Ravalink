@@ -19,7 +19,7 @@ use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, PlayerStateUpdate,
     PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage, Track,
-    WebSocketMessage, decode_track,
+    WebSocketMessage, decode_track, encode_track,
 };
 use serde::Deserialize;
 use std::{
@@ -782,12 +782,17 @@ async fn resolve_player_track(
         track.info.source_name.as_str(),
         "youtube" | "spotify" | "applemusic" | "deezer"
     ) {
+        let position = track.info.position;
         let uri = track
             .info
             .uri
             .clone()
             .ok_or_else(|| "plugin track has no source URI".to_owned())?;
-        return resolve_plugin_audio_track(state, &uri).await;
+        let (mut plugin_track, frames) = resolve_plugin_audio_track(state, &uri).await?;
+        plugin_track.info.position = position;
+        plugin_track.encoded =
+            encode_track(&plugin_track).map_err(|error| error.message)?;
+        return Ok((plugin_track, frames));
     }
     if track.info.source_name != "http" {
         return Err(format!(

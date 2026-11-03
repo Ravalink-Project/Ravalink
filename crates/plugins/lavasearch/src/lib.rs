@@ -176,9 +176,11 @@ impl LavaSearchPlugin {
                 SearchKind::Tracks => Value::Null,
             })
             .collect::<Vec<_>>();
+        let mut payload = serde_json::Map::new();
+        payload.insert(result_key.to_owned(), Value::Array(results));
         Ok(PluginLoadResult::new(
             PluginLoadType::Search,
-            json!({result_key: results}),
+            Value::Object(payload),
         ))
     }
 
