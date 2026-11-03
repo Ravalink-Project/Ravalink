@@ -272,6 +272,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pcm_cache_evicts_oldest_entries_to_respect_its_limit() {
+        let manager = HttpSourceManager::new(16);
+        let frame = PcmFrame {
+            samples: vec![0.1, 0.2],
+            channels: 2,
+            sample_rate: 48_000,
+        };
+        manager
+            .insert_cache("first".into(), vec![frame.clone()], 8)
+            .unwrap();
+        manager
+            .insert_cache("second".into(), vec![frame], 12)
+            .unwrap();
+
+        assert_eq!(manager.cached_bytes().unwrap(), 12);
+        assert!(manager.take_frames("first").unwrap().is_none());
+        assert!(manager.take_frames("second").unwrap().is_some());
+        assert_eq!(manager.cached_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn taking_pcm_frames_removes_the_cache_entry() {
+        let manager = HttpSourceManager::new(64);
+        let frame = PcmFrame {
+            samples: vec![0.1, -0.1],
+            channels: 2,
+            sample_rate: 48_000,
+        };
+        manager
+            .insert_cache("track".into(), vec![frame], 8)
+            .unwrap();
+
+        assert!(manager.take_frames("track").unwrap().is_some());
+        assert!(manager.take_frames("track").unwrap().is_none());
+        assert_eq!(manager.cached_bytes().unwrap(), 0);
+    }
+
+    #[test]
     fn maps_common_media_extensions_to_lavaplayer_probes() {
         assert_eq!(probe_name(Some("mp3"), ""), Some("MPEG"));
         assert_eq!(probe_name(Some("wav"), ""), Some("WAV"));

@@ -83,7 +83,7 @@ impl Default for ServerInfo {
             },
             jvm: "Not used (native Rust runtime)".into(),
             lavaplayer: "Not used (native RavaLink audio engine)".into(),
-            source_managers: Vec::new(),
+            source_managers: vec!["http".into()],
             filters: vec![
                 "volume".into(),
                 "equalizer".into(),
