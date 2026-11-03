@@ -106,7 +106,7 @@ fn built_in_plugins() -> PluginRegistry {
     let mut plugins = PluginRegistry::default();
     plugins.register(YouTubePlugin::default());
     plugins.register(LavaSrcPlugin::default());
-    plugins.register(LavaSearchPlugin);
+    plugins.register(LavaSearchPlugin::default());
     plugins
 }
 
@@ -240,9 +240,13 @@ async fn info_endpoint(headers: HeaderMap, State(state): State<AppState>) -> Res
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
-    let mut info = ServerInfo::default();
-    info.plugins = state.plugins.infos();
-    info.source_managers.push("youtube".to_owned());
+    let mut source_managers = ServerInfo::default().source_managers;
+    source_managers.push("youtube".to_owned());
+    let info = ServerInfo {
+        plugins: state.plugins.infos(),
+        source_managers,
+        ..ServerInfo::default()
+    };
     Json(info).into_response()
 }
 

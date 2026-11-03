@@ -1,6 +1,20 @@
-//! Search syntax and result-kind contracts compatible with LavaSearch.
+//! Native LavaSearch-compatible provider search.
+//!
+//! Track search results are resolved through LavaSrc so their playback metadata
+//! and source identity are consistent with direct provider links. Collection
+//! searches return structured provider metadata.
 
-use ravalink_plugin_api::{PluginDescriptor, RavaLinkPlugin};
+use async_trait::async_trait;
+use ravalink_plugin_api::{
+    PluginDescriptor, PluginError, PluginLoadResult, PluginLoadType, RavaLinkPlugin,
+};
+use ravalink_plugin_lavasrc::LavaSrcPlugin;
+use serde_json::{Value, json};
+use std::{
+    env,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchProvider {
@@ -28,8 +42,26 @@ pub struct SearchRequest {
     pub query: String,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct LavaSearchPlugin;
+#[derive(Clone)]
+pub struct LavaSearchPlugin {
+    client: reqwest::Client,
+    lavasrc: LavaSrcPlugin,
+    spotify_token: Arc<Mutex<Option<(String, Instant)>>>,
+}
+
+impl Default for LavaSearchPlugin {
+    fn default() -> Self {
+        Self {
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .user_agent("RavaLink/0.1 (native LavaSearch)")
+                .build()
+                .expect("valid default HTTP client"),
+            lavasrc: LavaSrcPlugin::default(),
+            spotify_token: Arc::new(Mutex::new(None)),
+        }
+    }
+}
 
 impl LavaSearchPlugin {
     pub fn parse_request(identifier: &str) -> Option<SearchRequest> {
@@ -57,8 +89,251 @@ impl LavaSearchPlugin {
             query: query.to_owned(),
         })
     }
+
+    async fn search_tracks(
+        &self,
+        provider: SearchProvider,
+        query: &str,
+    ) -> Result<PluginLoadResult, PluginError> {
+        let links = match provider {
+            SearchProvider::Spotify => self.spotify_track_links(query).await?,
+            SearchProvider::AppleMusic => self.apple_track_links(query).await?,
+            SearchProvider::Deezer | SearchProvider::All => self.deezer_track_links(query).await?,
+            SearchProvider::YouTube | SearchProvider::YouTubeMusic => {
+                return Err(PluginError::new(
+                    "lavasearch",
+                    "YouTube search is handled by the native YouTube plugin",
+                ));
+            }
+            SearchProvider::SoundCloud => {
+                return Err(PluginError::new(
+                    "lavasearch",
+                    "SoundCloud search is outside the enabled plugin scope",
+                ));
+            }
+        };
+
+        let mut tracks = Vec::new();
+        for link in links.into_iter().take(5) {
+            if let Ok(Some(result)) = self.lavasrc.load_tracks(&link).await
+                && result.load_type == PluginLoadType::Track
+            {
+                tracks.push(result.data);
+            }
+        }
+        Ok(PluginLoadResult::new(
+            PluginLoadType::Search,
+            Value::Array(tracks),
+        ))
+    }
+
+    async fn search_collections(
+        &self,
+        kind: SearchKind,
+        query: &str,
+    ) -> Result<PluginLoadResult, PluginError> {
+        let (endpoint, result_key) = match kind {
+            SearchKind::Albums => ("album", "albums"),
+            SearchKind::Artists => ("artist", "artists"),
+            SearchKind::Playlists => ("playlist", "playlists"),
+            SearchKind::Tracks => {
+                return Err(PluginError::new(
+                    "lavasearch",
+                    "track search must use the track search endpoint",
+                ));
+            }
+        };
+        let data = self
+            .deezer_search(endpoint, query)
+            .await?
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let results = data
+            .iter()
+            .map(|item| match kind {
+                SearchKind::Albums => json!({
+                    "id": item.get("id"),
+                    "name": item.get("title"),
+                    "uri": item.get("link"),
+                    "artworkUrl": item.get("cover_xl"),
+                    "artist": item.get("artist").and_then(|artist| artist.get("name")),
+                }),
+                SearchKind::Artists => json!({
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "uri": item.get("link"),
+                    "artworkUrl": item.get("picture_xl"),
+                }),
+                SearchKind::Playlists => json!({
+                    "id": item.get("id"),
+                    "name": item.get("title"),
+                    "uri": item.get("link"),
+                    "artworkUrl": item.get("picture_xl"),
+                    "author": item.get("user").and_then(|user| user.get("name")),
+                }),
+                SearchKind::Tracks => Value::Null,
+            })
+            .collect::<Vec<_>>();
+        Ok(PluginLoadResult::new(
+            PluginLoadType::Search,
+            json!({result_key: results}),
+        ))
+    }
+
+    async fn deezer_search(&self, kind: &str, query: &str) -> Result<Value, PluginError> {
+        let endpoint = if kind == "track" {
+            "https://api.deezer.com/search".to_owned()
+        } else {
+            format!("https://api.deezer.com/search/{kind}")
+        };
+        self.client
+            .get(endpoint)
+            .query(&[("q", query)])
+            .send()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("Deezer request failed: {error}")))?
+            .error_for_status()
+            .map_err(|error| PluginError::new("lavasearch", format!("Deezer returned an error: {error}")))?
+            .json()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("invalid Deezer response: {error}")))
+    }
+
+    async fn apple_search(&self, query: &str, entity: &str) -> Result<Value, PluginError> {
+        self.client
+            .get("https://itunes.apple.com/search")
+            .query(&[("term", query), ("entity", entity), ("limit", "5")])
+            .send()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("Apple Music request failed: {error}")))?
+            .error_for_status()
+            .map_err(|error| PluginError::new("lavasearch", format!("Apple Music returned an error: {error}")))?
+            .json()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("invalid Apple Music response: {error}")))
+    }
+
+    async fn spotify_token(&self) -> Result<String, PluginError> {
+        if let Ok(cache) = self.spotify_token.lock()
+            && let Some((token, expires_at)) = cache.as_ref()
+            && *expires_at > Instant::now()
+        {
+            return Ok(token.clone());
+        }
+
+        let client_id = env::var("RAVALINK_SPOTIFY_CLIENT_ID").map_err(|_| {
+            PluginError::new(
+                "lavasearch",
+                "Spotify search requires RAVALINK_SPOTIFY_CLIENT_ID and RAVALINK_SPOTIFY_CLIENT_SECRET",
+            )
+        })?;
+        let client_secret = env::var("RAVALINK_SPOTIFY_CLIENT_SECRET").map_err(|_| {
+            PluginError::new(
+                "lavasearch",
+                "Spotify search requires RAVALINK_SPOTIFY_CLIENT_ID and RAVALINK_SPOTIFY_CLIENT_SECRET",
+            )
+        })?;
+        let response: Value = self
+            .client
+            .post("https://accounts.spotify.com/api/token")
+            .basic_auth(client_id, Some(client_secret))
+            .form(&[("grant_type", "client_credentials")])
+            .send()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("Spotify token request failed: {error}")))?
+            .error_for_status()
+            .map_err(|error| PluginError::new("lavasearch", format!("Spotify authentication failed: {error}")))?
+            .json()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("invalid Spotify token response: {error}")))?;
+        let token = response
+            .get("access_token")
+            .and_then(Value::as_str)
+            .ok_or_else(|| PluginError::new("lavasearch", "Spotify returned no access token"))?
+            .to_owned();
+        let expires_in = response
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .unwrap_or(3_600);
+        if let Ok(mut cache) = self.spotify_token.lock() {
+            *cache = Some((
+                token.clone(),
+                Instant::now() + Duration::from_secs(expires_in.saturating_sub(60)),
+            ));
+        }
+        Ok(token)
+    }
+
+    async fn spotify_search(&self, query: &str, kind: &str) -> Result<Value, PluginError> {
+        let token = self.spotify_token().await?;
+        self.client
+            .get("https://api.spotify.com/v1/search")
+            .bearer_auth(token)
+            .query(&[("q", query), ("type", kind), ("limit", "10")])
+            .send()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("Spotify search failed: {error}")))?
+            .error_for_status()
+            .map_err(|error| PluginError::new("lavasearch", format!("Spotify returned an error: {error}")))?
+            .json()
+            .await
+            .map_err(|error| PluginError::new("lavasearch", format!("invalid Spotify search response: {error}")))
+    }
+
+    async fn spotify_track_links(&self, query: &str) -> Result<Vec<String>, PluginError> {
+        let data = self.spotify_search(query, "track").await?;
+        Ok(data
+            .pointer("/tracks/items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                item.pointer("/external_urls/spotify")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect())
+    }
+
+    async fn apple_track_links(&self, query: &str) -> Result<Vec<String>, PluginError> {
+        let data = self.apple_search(query, "song").await?;
+        Ok(data
+            .get("results")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                item.get("trackViewUrl")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect())
+    }
+
+    async fn deezer_track_links(&self, query: &str) -> Result<Vec<String>, PluginError> {
+        let data = self.deezer_search("track", query).await?;
+        Ok(data
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                item.get("link")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        item.get("id")
+                            .and_then(Value::as_u64)
+                            .map(|id| format!("https://www.deezer.com/track/{id}"))
+                    })
+            })
+            .collect())
+    }
 }
 
+#[async_trait]
 impl RavaLinkPlugin for LavaSearchPlugin {
     fn descriptor(&self) -> PluginDescriptor {
         PluginDescriptor {
@@ -76,6 +351,20 @@ impl RavaLinkPlugin for LavaSearchPlugin {
 
     fn supports_identifier(&self, identifier: &str) -> bool {
         Self::parse_request(identifier).is_some()
+    }
+
+    async fn load_tracks(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<PluginLoadResult>, PluginError> {
+        let Some(request) = Self::parse_request(identifier) else {
+            return Ok(None);
+        };
+        let result = match request.kind {
+            SearchKind::Tracks => self.search_tracks(request.provider, &request.query).await?,
+            kind => self.search_collections(kind, &request.query).await?,
+        };
+        Ok(Some(result))
     }
 }
 

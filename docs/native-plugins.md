@@ -7,7 +7,7 @@ server. They are separate crates and share the `ravalink-plugin-api` contract.
 |---|---|---|
 | `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, AAC audio-format selection, timestamped starts, video search and playlist expansion |
 | `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer track metadata with YouTube audio matching |
-| `ravalink-plugin-lavasearch` | LavaSearch | Track, album, artist and playlist search syntax |
+| `ravalink-plugin-lavasearch` | LavaSearch | YouTube, Spotify, Apple Music and Deezer track search; Deezer album, artist and playlist discovery |
 
 The crates are separate so they can be developed, tested, configured and eventually
 distributed independently. They do not load Java `.jar` files and do not require a JVM.
@@ -25,8 +25,17 @@ over Opus/WebM so the current Symphonia decoder can process the stream.
 Track links from Spotify, Apple Music and Deezer are resolved to provider metadata,
 then matched against YouTube for a playable audio stream. Track identity and metadata
 remain associated with the original provider in the returned Lavalink track. Album,
-artist and playlist expansion, provider-native search and more advanced matching still
-need implementation.
+artist and playlist expansion, provider-native collection resolution and more advanced
+matching still need implementation.
+
+## LavaSearch
+
+Track search is available through `spsearch:`, `amsearch:`, `dzsearch:` and the
+generic `search:` prefix. Search results are resolved to playable provider tracks.
+Album, artist and playlist discovery currently uses Deezer's public search API.
+
+Spotify search requires a Spotify developer application's client credentials:
+`RAVALINK_SPOTIFY_CLIENT_ID` and `RAVALINK_SPOTIFY_CLIENT_SECRET`.
 
 ## Current playback limitation
 
@@ -34,9 +43,3 @@ Resolved media is currently downloaded and decoded through the bounded HTTP sour
 pipeline. This is a functional initial playback path, not yet a production-grade
 segmented/live streaming implementation. Availability depends on the configured
 Invidious instance and each provider's upstream behavior.
-
-## LavaSearch
-
-The search request syntax is present for tracks, albums, artists and playlists.
-Actual provider-specific search and structured collection result builders remain to
-be implemented.
