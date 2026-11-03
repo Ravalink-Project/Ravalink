@@ -44,6 +44,8 @@ Configuration is loaded from `config/ravalink.toml` by default, or from
 - `RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES` (default: 134217728)
 - `RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES` (default: 268435456)
 
+Prometheus metrics are disabled by default. Enable them with `[metrics].prometheus_enabled = true` in the TOML file and optionally change `[metrics].prometheus_endpoint` (default: `/metrics`). The endpoint is intentionally unauthenticated for Prometheus scraping; restrict access at the network or reverse-proxy layer.
+
 A sample is available at [config/ravalink.example.toml](config/ravalink.example.toml).
 
 ## Project direction
