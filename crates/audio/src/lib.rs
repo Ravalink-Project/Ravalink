@@ -6,6 +6,9 @@
 
 use ravalink_protocol::{Filters, Omissible};
 
+pub mod http_source;
+pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
+
 /// Interleaved floating-point PCM audio.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PcmFrame {

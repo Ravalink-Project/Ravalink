@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 ravalink-protocol = { path = "../protocol" }
 symphonia = { version = "0.5", features = ["all"] }
+reqwest.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
