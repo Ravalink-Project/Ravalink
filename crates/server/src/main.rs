@@ -766,7 +766,10 @@ async fn resolve_player_track(
     if let Some(frames) = frames {
         return Ok((track, frames));
     }
-    if matches!(track.info.source_name.as_str(), "youtube" | "spotify" | "applemusic" | "deezer") {
+    if matches!(
+        track.info.source_name.as_str(),
+        "youtube" | "spotify" | "applemusic" | "deezer"
+    ) {
         let uri = track
             .info
             .uri

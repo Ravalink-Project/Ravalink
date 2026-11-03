@@ -68,7 +68,11 @@ impl Default for LavaSrcPlugin {
 impl LavaSrcPlugin {
     pub fn parse_identifier(identifier: &str) -> Option<ProviderIdentifier> {
         let url = split_url(identifier)?;
-        let segments: Vec<&str> = url.path.split('/').filter(|part| !part.is_empty()).collect();
+        let segments: Vec<&str> = url
+            .path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect();
         let provider = match url.host.as_str() {
             "open.spotify.com" | "spotify.com" | "www.spotify.com" => MusicProvider::Spotify,
             "music.apple.com" | "itunes.apple.com" => MusicProvider::AppleMusic,
@@ -185,9 +189,9 @@ impl LavaSrcPlugin {
             .get("results")
             .and_then(Value::as_array)
             .and_then(|items| {
-                items.iter().find(|item| {
-                    item.get("wrapperType").and_then(Value::as_str) == Some("track")
-                })
+                items
+                    .iter()
+                    .find(|item| item.get("wrapperType").and_then(Value::as_str) == Some("track"))
             })
             .ok_or_else(|| PluginError::new("lavasrc", "Apple Music did not return a track"))?;
         Ok(ExternalTrack {
@@ -266,7 +270,10 @@ impl LavaSrcPlugin {
         if parsed.content_type != "track" {
             return Err(PluginError::new(
                 "lavasrc",
-                format!("{} collections are not implemented yet", parsed.content_type),
+                format!(
+                    "{} collections are not implemented yet",
+                    parsed.content_type
+                ),
             ));
         }
         let metadata = self.resolve_metadata(identifier, parsed).await?;
@@ -291,8 +298,8 @@ impl LavaSrcPlugin {
             matched.info.artwork_url = metadata.artwork_url;
         }
         matched.info.isrc = metadata.isrc;
-        matched.encoded = encode_track(&matched)
-            .map_err(|error| PluginError::new("lavasrc", error.message))?;
+        matched.encoded =
+            encode_track(&matched).map_err(|error| PluginError::new("lavasrc", error.message))?;
         matched.plugin_info["matchedSource"] = json!("youtube");
         Ok(matched)
     }
@@ -321,10 +328,7 @@ impl RavaLinkPlugin for LavaSrcPlugin {
         Self::parse_identifier(identifier).is_some()
     }
 
-    async fn load_tracks(
-        &self,
-        identifier: &str,
-    ) -> Result<Option<PluginLoadResult>, PluginError> {
+    async fn load_tracks(&self, identifier: &str) -> Result<Option<PluginLoadResult>, PluginError> {
         let Some(parsed) = Self::parse_identifier(identifier) else {
             return Ok(None);
         };

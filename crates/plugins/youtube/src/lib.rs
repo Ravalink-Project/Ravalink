@@ -159,9 +159,8 @@ impl YouTubePlugin {
 
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, PluginError> {
         let result = self.search(query).await?;
-        serde_json::from_value(result.data).map_err(|error| {
-            PluginError::new("youtube", format!("invalid search tracks: {error}"))
-        })
+        serde_json::from_value(result.data)
+            .map_err(|error| PluginError::new("youtube", format!("invalid search tracks: {error}")))
     }
 
     pub async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
@@ -403,7 +402,7 @@ mod tests {
             YouTubePlugin::search_query("ytsearch:lofi hip hop"),
             Some("lofi hip hop")
         );
-        assert!(YouTubePlugin::is_search("ytmsearch:ambient"));
+        assert!(YouTubePlugin.is_search("ytmsearch:ambient"));
     }
 
     #[test]
