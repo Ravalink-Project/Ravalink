@@ -144,6 +144,34 @@ mod tests {
     }
 
     #[test]
+    fn stats_message_matches_lavalink_wire_shape() {
+        let message = WebSocketMessage::Stats(StatsMessage {
+            players: 2,
+            playing_players: 1,
+            uptime: 60_000,
+            memory: MemoryStats {
+                free: 100,
+                used: 200,
+                allocated: 300,
+                reservable: 400,
+            },
+            cpu: CpuStats {
+                cores: 4,
+                system_load: 0.25,
+                lavalink_load: 0.1,
+            },
+            frame_stats: None,
+        });
+        let json = serde_json::to_value(message).unwrap();
+        assert_eq!(json["op"], "stats");
+        assert_eq!(json["players"], 2);
+        assert_eq!(json["playingPlayers"], 1);
+        assert_eq!(json["memory"]["reservable"], 400);
+        assert_eq!(json["cpu"]["systemLoad"], 0.25);
+        assert!(json.get("frameStats").is_none());
+    }
+
+    #[test]
     fn player_update_message_matches_lavalink_wire_shape() {
         let message = WebSocketMessage::PlayerUpdate(PlayerUpdateMessage {
             guild_id: "123".into(),
