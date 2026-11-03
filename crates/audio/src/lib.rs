@@ -11,9 +11,11 @@ pub mod http_source;
 pub mod opus;
 pub mod rtp;
 pub mod voice_pcm;
+pub mod voice_crypto;
 pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
 pub use opus::OpusFrameEncoder;
 pub use rtp::RtpPacketizer;
+pub use voice_crypto::{VoiceEncryptionMode, VoicePacketEncryptor};
 pub use voice_pcm::{VOICE_FRAME_SAMPLES_PER_CHANNEL, normalize_for_voice};
 
 /// Interleaved floating-point PCM audio.
