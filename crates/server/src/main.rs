@@ -372,7 +372,11 @@ async fn update_player(
             Some(None)
         } else {
             let Some(voice) = voice.as_object() else {
-                return api_error(StatusCode::BAD_REQUEST, "Voice state must be an object or null", &path);
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "Voice state must be an object or null",
+                    &path,
+                );
             };
             let (Some(token), Some(endpoint), Some(session_id)) = (
                 voice.get("token").and_then(serde_json::Value::as_str),

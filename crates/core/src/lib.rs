@@ -277,11 +277,7 @@ impl PlayerStore {
         }
     }
 
-    pub async fn voice_state(
-        &self,
-        session_id: &str,
-        guild_id: &str,
-    ) -> Option<DiscordVoiceState> {
+    pub async fn voice_state(&self, session_id: &str, guild_id: &str) -> Option<DiscordVoiceState> {
         self.voice_states
             .read()
             .await
@@ -605,10 +601,7 @@ mod audio_player_store_tests {
         store
             .set_voice_state("session-a", "guild-a", Some(voice.clone()))
             .await;
-        assert_eq!(
-            store.voice_state("session-a", "guild-a").await,
-            Some(voice)
-        );
+        assert_eq!(store.voice_state("session-a", "guild-a").await, Some(voice));
         assert!(store.remove("session-a", "guild-a").await);
         assert!(store.voice_state("session-a", "guild-a").await.is_none());
     }
