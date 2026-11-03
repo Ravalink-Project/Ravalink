@@ -217,6 +217,36 @@ impl RavaLinkPlugin for YouTubePlugin {
         }
         let parsed = Self::parse_identifier(identifier)
             .ok_or_else(|| PluginError::new("youtube", "invalid YouTube identifier"))?;
+        if let Some(playlist_id) = parsed.playlist_id {
+            let mut result = self.load_playlist(&playlist_id).await?;
+            if let Some(video_id) = parsed.video_id {
+                let tracks = result
+                    .data
+                    .get_mut("tracks")
+                    .and_then(Value::as_array_mut)
+                    .ok_or_else(|| PluginError::new("youtube", "playlist response has no tracks"))?;
+                let selected = tracks.iter().position(|track| {
+                    track
+                        .get("info")
+                        .and_then(|info| info.get("identifier"))
+                        .and_then(Value::as_str)
+                        == Some(video_id.as_str())
+                });
+                if let Some(index) = selected {
+                    if let Some(start_seconds) = parsed.start_seconds {
+                        let mut track: Track = serde_json::from_value(tracks[index].clone())
+                            .map_err(|error| PluginError::new("youtube", format!("invalid playlist track: {error}")))?;
+                        track.info.position = start_seconds.saturating_mul(1_000);
+                        track.encoded = encode_track(&track)
+                            .map_err(|error| PluginError::new("youtube", error.message))?;
+                        tracks[index] = serde_json::to_value(track)
+                            .expect("playlist track serializes");
+                    }
+                    result.data["info"]["selectedTrack"] = json!(index);
+                }
+            }
+            return Ok(Some(result));
+        }
         if let Some(video_id) = parsed.video_id {
             let mut track = self.load_video(&video_id).await?;
             if let Some(start_seconds) = parsed.start_seconds {
@@ -228,9 +258,6 @@ impl RavaLinkPlugin for YouTubePlugin {
                 PluginLoadType::Track,
                 serde_json::to_value(track).expect("track serializes"),
             )));
-        }
-        if let Some(playlist_id) = parsed.playlist_id {
-            return self.load_playlist(&playlist_id).await.map(Some);
         }
         Ok(None)
     }
