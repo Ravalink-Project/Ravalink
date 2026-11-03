@@ -7,12 +7,14 @@
 use crate::voice_pcm::VoicePcmPacketizer;
 use ravalink_protocol::{Filters, Omissible};
 
+pub mod dave;
 pub mod http_source;
 pub mod opus;
 pub mod rtp;
 pub mod voice_crypto;
 pub mod voice_pcm;
 pub mod voice_udp;
+pub use dave::{DaveVoiceError, DaveVoiceSession};
 pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
 pub use opus::OpusFrameEncoder;
 pub use rtp::RtpPacketizer;
