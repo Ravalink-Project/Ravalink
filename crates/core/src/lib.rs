@@ -1,8 +1,8 @@
 //! Runtime state shared by the protocol and audio layers.
 
 use ravalink_audio::{
-    AudioError, AudioPipeline, AudioTrack, NativePlayer, PcmFrame, PlayerSnapshot, RtpPacketizer,
-    VoicePacketPipeline,
+    AudioError, AudioPipeline, AudioTrack, DiscordUdpTransport, NativePlayer, PcmFrame,
+    PlayerSnapshot, RtpPacketizer, VoicePacketPipeline,
 };
 use ravalink_protocol::Filters;
 use serde_json::{Value, json};
@@ -482,6 +482,27 @@ impl AudioPlayerStore {
         };
         let mut player = player.lock().await;
         player.next_encrypted_voice_packet(pipeline)
+    }
+
+    /// Produce, encrypt and send the next available Opus voice packet.
+    ///
+    /// The caller owns the negotiated packet pipeline and drives this method at
+    /// Discord's 20 ms voice cadence. No player lock is held during UDP I/O.
+    pub async fn send_next_voice_packet(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        pipeline: &mut VoicePacketPipeline,
+        transport: &DiscordUdpTransport,
+    ) -> Result<bool, AudioError> {
+        let Some(packet) = self
+            .next_encrypted_voice_packet(session_id, guild_id, pipeline)
+            .await?
+        else {
+            return Ok(false);
+        };
+        transport.send_voice_packet(&packet).await?;
+        Ok(true)
     }
 
     pub async fn next_rtp_packet(
