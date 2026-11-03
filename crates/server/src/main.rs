@@ -920,9 +920,8 @@ mod server_api_tests {
             ("volume", serde_json::json!(1001)),
             ("filters", serde_json::json!([])),
         ] {
-            let invalid = serde_json::Value::Object(
-                [(field.to_owned(), value)].into_iter().collect(),
-            );
+            let invalid =
+                serde_json::Value::Object([(field.to_owned(), value)].into_iter().collect());
             assert_eq!(
                 invalid_player_field(invalid.as_object().unwrap()),
                 Some(field)
