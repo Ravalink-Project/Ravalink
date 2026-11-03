@@ -436,10 +436,11 @@ impl DspProcessor {
         let speed = filter.rotation_hz;
         let step = std::f64::consts::TAU * speed / frame.sample_rate as f64;
         for pair in frame.samples.chunks_exact_mut(usize::from(frame.channels)) {
-            let mid = (pair[0] + pair[1]) * 0.5;
-            let side = (pair[0] - pair[1]) * 0.5 * self.rotation_phase.cos() as f32;
-            pair[0] = mid + side;
-            pair[1] = mid - side;
+            let (sin, cos) = self.rotation_phase.sin_cos();
+            let left = pair[0];
+            let right = pair[1];
+            pair[0] = left * cos as f32 - right * sin as f32;
+            pair[1] = left * sin as f32 + right * cos as f32;
             self.rotation_phase = (self.rotation_phase + step).rem_euclid(std::f64::consts::TAU);
         }
     }
@@ -758,6 +759,19 @@ mod tests {
         let mut processor = DspProcessor::default();
         assert!(processor.process(&mut frame(vec![0.0], 0)).is_err());
         assert!(processor.process(&mut frame(vec![0.0], 2)).is_err());
+    }
+
+    #[test]
+    fn rotation_filter_rotates_the_stereo_field() {
+        let filters: Filters = serde_json::from_value(json!({
+            "rotation": {"rotationHz": 0.0}
+        }))
+        .unwrap();
+        let mut processor = DspProcessor::new(filters);
+        let mut input = frame(vec![1.0, 0.0], 2);
+        processor.process(&mut input).unwrap();
+        assert!((input.samples[0] - 1.0).abs() < 0.0001);
+        assert!(input.samples[1].abs() < 0.0001);
     }
 
     #[test]

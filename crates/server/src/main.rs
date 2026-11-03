@@ -301,6 +301,7 @@ async fn delete_player(
             &format!("/v4/sessions/{session_id}"),
         );
     }
+    state.audio_players.remove(&session_id, &_guild_id).await;
     state.players.remove(&session_id, &_guild_id).await;
     StatusCode::NO_CONTENT.into_response()
 }
