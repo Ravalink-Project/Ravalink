@@ -8,3 +8,4 @@ license.workspace = true
 ravalink-protocol = { path = "../../protocol" }
 async-trait.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
