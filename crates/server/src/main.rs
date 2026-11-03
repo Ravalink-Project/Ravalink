@@ -45,6 +45,11 @@ struct DecodeTrackQuery {
     track: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct RoutePlannerFreeAddress {
+    address: String,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct PlayerUpdateQuery {
@@ -262,7 +267,11 @@ async fn routeplanner_status(headers: HeaderMap, State(state): State<AppState>) 
     StatusCode::NO_CONTENT.into_response()
 }
 
-async fn routeplanner_free_address(headers: HeaderMap, State(state): State<AppState>) -> Response {
+async fn routeplanner_free_address(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(_body): Json<RoutePlannerFreeAddress>,
+) -> Response {
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
@@ -935,7 +944,14 @@ mod server_api_tests {
 
     #[tokio::test]
     async fn routeplanner_free_operations_report_disabled_planner() {
-        let address = routeplanner_free_address(authorized_headers(), State(state())).await;
+        let address = routeplanner_free_address(
+            authorized_headers(),
+            State(state()),
+            Json(RoutePlannerFreeAddress {
+                address: "203.0.113.1".into(),
+            }),
+        )
+        .await;
         let all = routeplanner_free_all(authorized_headers(), State(state())).await;
         assert_eq!(address.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(all.status(), StatusCode::INTERNAL_SERVER_ERROR);
