@@ -8,5 +8,6 @@ license.workspace = true
 ravalink-protocol = { path = "../protocol" }
 symphonia = { version = "0.5", features = ["all"] }
 reqwest.workspace = true
+opus2.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
