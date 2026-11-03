@@ -98,7 +98,13 @@ impl LavaSearchPlugin {
         let links = match provider {
             SearchProvider::Spotify => self.spotify_track_links(query).await?,
             SearchProvider::AppleMusic => self.apple_track_links(query).await?,
-            SearchProvider::Deezer | SearchProvider::All => self.deezer_track_links(query).await?,
+            SearchProvider::Deezer => self.deezer_track_links(query).await?,
+            SearchProvider::All => {
+                let mut links = self.deezer_track_links(query).await?;
+                links.extend(self.apple_track_links(query).await.unwrap_or_default());
+                links.extend(self.spotify_track_links(query).await.unwrap_or_default());
+                links
+            }
             SearchProvider::YouTube | SearchProvider::YouTubeMusic => {
                 return Err(PluginError::new(
                     "lavasearch",
@@ -143,14 +149,14 @@ impl LavaSearchPlugin {
                 ));
             }
         };
-        let data = self
+        let deezer_data = self
             .deezer_search(endpoint, query)
             .await?
             .get("data")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let results = data
+        let mut results = deezer_data
             .iter()
             .map(|item| match kind {
                 SearchKind::Albums => json!({
@@ -159,12 +165,14 @@ impl LavaSearchPlugin {
                     "uri": item.get("link"),
                     "artworkUrl": item.get("cover_xl"),
                     "artist": item.get("artist").and_then(|artist| artist.get("name")),
+                    "source": "deezer",
                 }),
                 SearchKind::Artists => json!({
                     "id": item.get("id"),
                     "name": item.get("name"),
                     "uri": item.get("link"),
                     "artworkUrl": item.get("picture_xl"),
+                    "source": "deezer",
                 }),
                 SearchKind::Playlists => json!({
                     "id": item.get("id"),
@@ -172,10 +180,74 @@ impl LavaSearchPlugin {
                     "uri": item.get("link"),
                     "artworkUrl": item.get("picture_xl"),
                     "author": item.get("user").and_then(|user| user.get("name")),
+                    "source": "deezer",
                 }),
                 SearchKind::Tracks => Value::Null,
             })
             .collect::<Vec<_>>();
+
+        if let Ok(spotify) = self.spotify_search(query, endpoint).await {
+            let path = format!("/{endpoint}s/items");
+            if let Some(items) = spotify.pointer(&path).and_then(Value::as_array) {
+                results.extend(items.iter().map(|item| {
+                    let artwork = item
+                        .get("images")
+                        .and_then(Value::as_array)
+                        .and_then(|images| images.first())
+                        .and_then(|image| image.get("url"));
+                    let artist = item
+                        .get("artists")
+                        .and_then(Value::as_array)
+                        .and_then(|artists| artists.first())
+                        .and_then(|artist| artist.get("name"));
+                    json!({
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "uri": item.pointer("/external_urls/spotify"),
+                        "artworkUrl": artwork,
+                        "artist": artist,
+                        "author": item.get("owner").and_then(|owner| owner.get("display_name")),
+                        "source": "spotify",
+                    })
+                }));
+            }
+        }
+
+        if kind != SearchKind::Playlists {
+            let entity = match kind {
+                SearchKind::Albums => "album",
+                SearchKind::Artists => "musicArtist",
+                SearchKind::Tracks | SearchKind::Playlists => unreachable!(),
+            };
+            if let Ok(apple) = self.apple_search(query, entity).await
+                && let Some(items) = apple.get("results").and_then(Value::as_array)
+            {
+                results.extend(items.iter().map(|item| {
+                    let (id, name, uri) = if kind == SearchKind::Albums {
+                        (
+                            item.get("collectionId"),
+                            item.get("collectionName"),
+                            item.get("collectionViewUrl"),
+                        )
+                    } else {
+                        (
+                            item.get("artistId"),
+                            item.get("artistName"),
+                            item.get("artistLinkUrl"),
+                        )
+                    };
+                    json!({
+                        "id": id,
+                        "name": name,
+                        "uri": uri,
+                        "artworkUrl": item.get("artworkUrl100"),
+                        "artist": item.get("artistName"),
+                        "source": "applemusic",
+                    })
+                }));
+            }
+        }
+
         let mut payload = serde_json::Map::new();
         payload.insert(result_key.to_owned(), Value::Array(results));
         Ok(PluginLoadResult::new(
@@ -183,7 +255,6 @@ impl LavaSearchPlugin {
             Value::Object(payload),
         ))
     }
-
     async fn deezer_search(&self, kind: &str, query: &str) -> Result<Value, PluginError> {
         let endpoint = if kind == "track" {
             "https://api.deezer.com/search".to_owned()

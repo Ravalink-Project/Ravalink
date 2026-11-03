@@ -34,7 +34,7 @@ through the current public catalog adapter.
 
 Track search is available through `spsearch:`, `amsearch:`, `dzsearch:` and the
 generic `search:` prefix. Search results are resolved to playable provider tracks.
-Album, artist and playlist discovery currently uses Deezer's public search API.
+Album, artist and playlist discovery aggregates Deezer, Spotify (when credentials are configured) and Apple Music catalog results.
 
 Spotify search and collection expansion require a Spotify developer application's client credentials:
 `RAVALINK_SPOTIFY_CLIENT_ID` and `RAVALINK_SPOTIFY_CLIENT_SECRET`.
