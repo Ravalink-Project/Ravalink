@@ -23,7 +23,9 @@ impl OpusFrameEncoder {
             ));
         }
         if complexity > 10 {
-            return Err(AudioError::invalid("Opus complexity must be between 0 and 10"));
+            return Err(AudioError::invalid(
+                "Opus complexity must be between 0 and 10",
+            ));
         }
 
         let mut encoder = Encoder::new(48_000, Channels::Stereo, Application::Audio)
