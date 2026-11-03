@@ -14,7 +14,8 @@ use ravalink_audio::{AudioTrack, HttpSourceManager, PcmFrame};
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, ServerInfo, SessionInfo,
-    SessionUpdate, StatsMessage, Track, WebSocketMessage, decode_track,
+    PlayerStateUpdate, PlayerUpdateMessage, SessionUpdate, StatsMessage, Track,
+    WebSocketMessage, decode_track,
 };
 use serde::Deserialize;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -30,6 +31,7 @@ struct AppState {
     audio_players: AudioPlayerStore,
     http_sources: HttpSourceManager,
     metrics_enabled: bool,
+    player_update_interval: u64,
     started_at: Instant,
 }
 
@@ -115,6 +117,7 @@ async fn main() {
             config.audio.max_decoded_cache_bytes,
         ),
         metrics_enabled: config.metrics.prometheus_enabled,
+        player_update_interval: config.server.player_update_interval,
         started_at: Instant::now(),
     };
 
@@ -846,6 +849,9 @@ async fn handle_socket(
 
     let mut stats_interval = tokio::time::interval(Duration::from_secs(60));
     stats_interval.tick().await;
+    let mut player_update_interval =
+        tokio::time::interval(Duration::from_secs(state.player_update_interval));
+    player_update_interval.tick().await;
     loop {
         tokio::select! {
             message = socket.recv() => {
@@ -876,6 +882,38 @@ async fn handle_socket(
                     .expect("WebSocket stats message serializes to JSON");
                 if socket.send(Message::Text(payload.into())).await.is_err() {
                     break;
+                }
+            }
+            _ = player_update_interval.tick() => {
+                let players = state.players.list(&session_id).await;
+                let time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                for player in players {
+                    let Some(guild_id) = player["guildId"].as_str() else {
+                        continue;
+                    };
+                    let Some(snapshot) = state.audio_players.snapshot(&session_id, guild_id).await else {
+                        continue;
+                    };
+                    if snapshot.track.is_none() {
+                        continue;
+                    }
+                    let message = WebSocketMessage::PlayerUpdate(PlayerUpdateMessage {
+                        guild_id: guild_id.to_owned(),
+                        state: PlayerStateUpdate {
+                            time,
+                            position: snapshot.position_ms,
+                            connected: false,
+                            ping: Some(-1),
+                        },
+                    });
+                    let payload = serde_json::to_string(&message)
+                        .expect("WebSocket player update serializes to JSON");
+                    if socket.send(Message::Text(payload.into())).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
@@ -920,6 +958,7 @@ mod server_api_tests {
             audio_players: AudioPlayerStore::default(),
             http_sources: HttpSourceManager::default(),
             metrics_enabled: false,
+            player_update_interval: 5,
             started_at: Instant::now(),
         }
     }

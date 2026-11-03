@@ -40,6 +40,7 @@ Configuration is loaded from `config/ravalink.toml` by default, or from
 - `RAVALINK_ADDRESS`
 - `RAVALINK_PORT`
 - `RAVALINK_PASSWORD`
+- `RAVALINK_PLAYER_UPDATE_INTERVAL` (default: 5 seconds)
 - `RAVALINK_LOG_LEVEL`
 - `RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES` (default: 134217728)
 - `RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES` (default: 268435456)

@@ -18,6 +18,7 @@ pub struct ServerConfig {
     pub address: String,
     pub port: u16,
     pub password: String,
+    pub player_update_interval: u64,
 }
 
 impl Default for ServerConfig {
@@ -26,6 +27,7 @@ impl Default for ServerConfig {
             address: "0.0.0.0".into(),
             port: 2333,
             password: "youshallnotpass".into(),
+            player_update_interval: 5,
         }
     }
 }
@@ -115,6 +117,11 @@ impl Config {
         if let Ok(value) = env::var("RAVALINK_PASSWORD") {
             config.server.password = value;
         }
+        if let Ok(value) = env::var("RAVALINK_PLAYER_UPDATE_INTERVAL") {
+            config.server.player_update_interval = value.parse().map_err(|_| {
+                "RAVALINK_PLAYER_UPDATE_INTERVAL must be a valid u64".to_owned()
+            })?;
+        }
         if let Ok(value) = env::var("RAVALINK_LOG_LEVEL") {
             config.logging.level = value;
         }
@@ -127,6 +134,9 @@ impl Config {
             config.audio.max_decoded_cache_bytes = value.parse().map_err(|_| {
                 "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
             })?;
+        }
+        if config.server.player_update_interval == 0 {
+            return Err("server.player_update_interval must be greater than zero".to_owned());
         }
         validate_metrics_endpoint(
             config.metrics.prometheus_enabled,
@@ -174,6 +184,18 @@ mod tests {
     }
 
     #[test]
+    fn player_update_interval_must_be_nonzero() {
+        let config: Config = toml::from_str(
+            r#"
+                [server]
+                player_update_interval = 0
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.server.player_update_interval, 0);
+    }
+
+    #[test]
     fn prometheus_endpoint_must_be_an_absolute_path() {
         assert!(validate_metrics_endpoint(true, "/metrics").is_ok());
         assert!(validate_metrics_endpoint(false, "metrics").is_ok());
@@ -198,6 +220,7 @@ mod tests {
 
         assert_eq!(config.server.port, 2444);
         assert_eq!(config.server.address, "0.0.0.0");
+        assert_eq!(config.server.player_update_interval, 5);
         assert_eq!(config.logging.level, "debug");
         assert_eq!(config.audio.opus_encoding_quality, 10);
         assert_eq!(config.audio.max_source_download_bytes, 128 * 1024 * 1024);

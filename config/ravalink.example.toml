@@ -5,6 +5,7 @@
 address = "0.0.0.0"
 port = 2333
 password = "youshallnotpass"
+player_update_interval = 5
 
 [logging]
 level = "info"
