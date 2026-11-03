@@ -20,7 +20,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
 | Audio sources | Search, resolve, stream, errors | Bounded direct HTTP(S) file resolver only; configurable download cap (128 MiB default) and decoded PCM cache (256 MiB default); no search providers or live stream support |
 | Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and REST-to-NativePlayer loading/control; bounded HTTP download and decoded-PCM cache; 48 kHz stereo resampling and 20 ms packetization; native Opus encoding; RTP v2 sequence/timestamp construction |
-| Discord voice | Gateway voice handshake, DAVE, RTP, encryption | RTP packet construction and legacy XSalsa20-Poly1305 normal/suffix/lite encryption primitives are implemented and tested; Discord UDP discovery/transport, gateway voice handshake, speaking state and DAVE are not implemented; voice state is stored from player updates |
+| Discord voice | Gateway voice handshake, DAVE, RTP, encryption | RTP packet construction, legacy XSalsa20-Poly1305 normal/suffix/lite encryption, UDP IP discovery and encrypted RTP datagram sending are implemented and tested as separate primitives; voice gateway handshake, automatic UDP negotiation, speaking state and DAVE are not implemented; voice state is stored from player updates |
 | Plugins | Native extension API | Not implemented |
 | Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players and decoded PCM cache byte gauges |
 
