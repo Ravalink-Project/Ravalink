@@ -104,8 +104,8 @@ fn invalid_player_field(
 
 fn built_in_plugins() -> PluginRegistry {
     let mut plugins = PluginRegistry::default();
-    plugins.register(YouTubePlugin);
-    plugins.register(LavaSrcPlugin);
+    plugins.register(YouTubePlugin::default());
+    plugins.register(LavaSrcPlugin::default());
     plugins.register(LavaSearchPlugin);
     plugins
 }
