@@ -1,6 +1,6 @@
 //! Direct HTTP media source adapter with bounded decoded-PCM caching.
 
-use crate::{AudioError, PcmFrame, decode_bytes};
+use crate::{AudioError, PcmFrame, decode_bytes_limited};
 use ravalink_protocol::{Track, TrackInfo, encode_track_with_source_data};
 use serde_json::json;
 use std::{
@@ -118,9 +118,14 @@ impl HttpSourceManager {
         let probe = probe_name(extension.as_deref(), &content_type)
             .ok_or_else(|| AudioError::invalid("unsupported direct HTTP audio format"))?;
         let decode_extension = extension.clone();
-        let source_bytes = body.to_vec();
+        let source_bytes = body;
+        let max_pcm_bytes = self.max_cache_bytes;
         let frames = tokio::task::spawn_blocking(move || {
-            decode_bytes(source_bytes, decode_extension.as_deref())
+            decode_bytes_limited(
+                source_bytes,
+                decode_extension.as_deref(),
+                max_pcm_bytes,
+            )
         })
         .await
         .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))??;

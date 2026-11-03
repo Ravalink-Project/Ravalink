@@ -102,6 +102,15 @@ impl Biquad {
 /// The caller owns source resolution and should run this CPU-bound function
 /// outside Tokio's async executor.
 pub fn decode_bytes(bytes: Vec<u8>, extension: Option<&str>) -> Result<Vec<PcmFrame>, AudioError> {
+    decode_bytes_limited(bytes, extension, usize::MAX)
+}
+
+/// Decode audio while enforcing a hard upper bound on retained interleaved PCM.
+pub fn decode_bytes_limited(
+    bytes: Vec<u8>,
+    extension: Option<&str>,
+    max_pcm_bytes: usize,
+) -> Result<Vec<PcmFrame>, AudioError> {
     use std::io::{Cursor, ErrorKind};
     use symphonia::core::{
         audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
@@ -131,6 +140,7 @@ pub fn decode_bytes(bytes: Vec<u8>, extension: Option<&str>) -> Result<Vec<PcmFr
         .map_err(|error| AudioError::invalid(format!("codec initialization failed: {error}")))?;
 
     let mut frames = Vec::new();
+    let mut decoded_bytes = 0_usize;
     loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
@@ -161,6 +171,14 @@ pub fn decode_bytes(bytes: Vec<u8>, extension: Option<&str>) -> Result<Vec<PcmFr
         samples.copy_interleaved_ref(decoded);
         let pcm = samples.samples().to_vec();
         if !pcm.is_empty() {
+            decoded_bytes = decoded_bytes
+                .checked_add(pcm.len().saturating_mul(std::mem::size_of::<f32>()))
+                .ok_or_else(|| AudioError::invalid("decoded PCM size overflow"))?;
+            if decoded_bytes > max_pcm_bytes {
+                return Err(AudioError::invalid(
+                    "decoded audio exceeds the configured PCM memory limit",
+                ));
+            }
             frames.push(PcmFrame {
                 samples: pcm,
                 channels,
@@ -666,6 +684,28 @@ mod tests {
             channels,
             sample_rate: 48_000,
         }
+    }
+
+    #[test]
+    fn limited_decoder_rejects_audio_that_exceeds_pcm_budget() {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&40u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&192_000u32.to_le_bytes());
+        wav.extend_from_slice(&4u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&4u32.to_le_bytes());
+        wav.extend_from_slice(&0i16.to_le_bytes());
+        wav.extend_from_slice(&16_384i16.to_le_bytes());
+
+        let error = decode_bytes_limited(wav, Some("wav"), 1).unwrap_err();
+        assert!(error.message.contains("PCM memory limit"));
     }
 
     #[test]
