@@ -645,13 +645,14 @@ impl NativePlayer {
         let frame_count = frame.samples.len() / usize::from(frame.channels);
         let elapsed_ms = (frame_count as u64 * 1_000) / u64::from(frame.sample_rate);
         self.position_ms = self.position_ms.saturating_add(elapsed_ms);
-        let effective_end = self.track.as_ref().and_then(|track| {
-            match (track.duration_ms, self.end_time_ms) {
-                (Some(duration), Some(end_time)) => Some(duration.min(end_time)),
-                (Some(duration), None) => Some(duration),
-                (None, end_time) => end_time,
-            }
-        });
+        let effective_end =
+            self.track
+                .as_ref()
+                .and_then(|track| match (track.duration_ms, self.end_time_ms) {
+                    (Some(duration), Some(end_time)) => Some(duration.min(end_time)),
+                    (Some(duration), None) => Some(duration),
+                    (None, end_time) => end_time,
+                });
         if effective_end.is_some_and(|end_time| self.position_ms >= end_time) {
             self.track = None;
             self.paused = false;
@@ -700,7 +701,9 @@ impl AudioPipeline for NativePlayer {
         if track
             .duration_ms
             .is_some_and(|duration| position_ms > duration)
-            || self.end_time_ms.is_some_and(|end_time| position_ms > end_time)
+            || self
+                .end_time_ms
+                .is_some_and(|end_time| position_ms > end_time)
         {
             return Err(AudioError::invalid("seek position exceeds track duration"));
         }
