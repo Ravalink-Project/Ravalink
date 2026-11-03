@@ -65,7 +65,12 @@ impl RavaLinkPlugin for LavaSearchPlugin {
             name: "lavasearch",
             version: env!("CARGO_PKG_VERSION"),
             description: "Advanced search for tracks, albums, artists and playlists",
-            capabilities: &["track-search", "album-search", "artist-search", "playlist-search"],
+            capabilities: &[
+                "track-search",
+                "album-search",
+                "artist-search",
+                "playlist-search",
+            ],
         }
     }
 
@@ -92,15 +97,21 @@ mod tests {
     #[test]
     fn parses_structured_search_kinds() {
         assert_eq!(
-            LavaSearchPlugin::parse_request("album:Discovery").unwrap().kind,
+            LavaSearchPlugin::parse_request("album:Discovery")
+                .unwrap()
+                .kind,
             SearchKind::Albums
         );
         assert_eq!(
-            LavaSearchPlugin::parse_request("artist:Daft Punk").unwrap().kind,
+            LavaSearchPlugin::parse_request("artist:Daft Punk")
+                .unwrap()
+                .kind,
             SearchKind::Artists
         );
         assert_eq!(
-            LavaSearchPlugin::parse_request("playlist:French house").unwrap().kind,
+            LavaSearchPlugin::parse_request("playlist:French house")
+                .unwrap()
+                .kind,
             SearchKind::Playlists
         );
     }

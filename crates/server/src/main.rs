@@ -346,6 +346,28 @@ async fn load_tracks(
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
+    match state.plugins.load_tracks(&query.identifier).await {
+        Ok(Some(plugin_result)) => {
+            return Json(LoadResult {
+                load_type: plugin_result.load_type.as_lavalink_str(),
+                data: Some(plugin_result.data),
+            })
+            .into_response();
+        }
+        Err(error) => {
+            return Json(LoadResult {
+                load_type: "error",
+                data: Some(serde_json::json!({
+                    "message": error.message,
+                    "severity": "common",
+                    "cause": error.message
+                })),
+            })
+            .into_response();
+        }
+        Ok(None) => {}
+    }
+
     if !query.identifier.starts_with("http://") && !query.identifier.starts_with("https://") {
         return Json(LoadResult::empty()).into_response();
     }
@@ -711,6 +733,9 @@ async fn resolve_player_track(
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(Track, Vec<PcmFrame>), String> {
     if let Some(identifier) = fields.get("identifier").and_then(serde_json::Value::as_str) {
+        if state.plugins.find(identifier).is_some() {
+            return resolve_plugin_audio_track(state, identifier).await;
+        }
         let resolved = state
             .http_sources
             .resolve(identifier)
@@ -746,6 +771,14 @@ async fn resolve_player_track(
     if let Some(frames) = frames {
         return Ok((track, frames));
     }
+    if track.info.source_name == "youtube" {
+        let uri = track
+            .info
+            .uri
+            .clone()
+            .ok_or_else(|| "YouTube track has no source URI".to_owned())?;
+        return resolve_plugin_audio_track(state, &uri).await;
+    }
     if track.info.source_name != "http" {
         return Err(format!(
             "source manager '{}' is not available on this node",
@@ -768,6 +801,39 @@ async fn resolve_player_track(
         .map_err(|error| error.message)?
         .ok_or_else(|| "decoded HTTP audio is no longer cached".to_owned())?;
     track = resolved.track;
+    Ok((track, frames))
+}
+
+async fn resolve_plugin_audio_track(
+    state: &AppState,
+    identifier: &str,
+) -> Result<(Track, Vec<PcmFrame>), String> {
+    let result = state
+        .plugins
+        .load_tracks(identifier)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "no native plugin can resolve this identifier".to_owned())?;
+    if result.load_type != ravalink_plugin_api::PluginLoadType::Track {
+        return Err("a playable track identifier is required".to_owned());
+    }
+    let track: Track = serde_json::from_value(result.data)
+        .map_err(|error| format!("plugin returned an invalid track: {error}"))?;
+    let stream_url = track
+        .plugin_info
+        .get("streamUrl")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "YouTube resolver returned no playable audio URL".to_owned())?;
+    let resolved = state
+        .http_sources
+        .resolve(stream_url)
+        .await
+        .map_err(|error| error.message)?;
+    let frames = state
+        .http_sources
+        .take_frames(&resolved.track.encoded)
+        .map_err(|error| error.message)?
+        .ok_or_else(|| "decoded plugin audio is no longer cached".to_owned())?;
     Ok((track, frames))
 }
 

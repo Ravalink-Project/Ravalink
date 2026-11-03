@@ -3,10 +3,40 @@
 //! Plugins are ordinary Rust components in the workspace. The API intentionally
 //! contains no JVM, class-loader, or Lavaplayer compatibility layer.
 
+use async_trait::async_trait;
 use ravalink_protocol::PluginInfo;
+use serde_json::Value;
 use std::{fmt, sync::Arc};
 
-/// Public metadata exposed through Lavalink's /v4/info endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginLoadType {
+    Track,
+    Playlist,
+    Search,
+}
+
+impl PluginLoadType {
+    pub const fn as_lavalink_str(self) -> &'static str {
+        match self {
+            Self::Track => "track",
+            Self::Playlist => "playlist",
+            Self::Search => "search",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginLoadResult {
+    pub load_type: PluginLoadType,
+    pub data: Value,
+}
+
+impl PluginLoadResult {
+    pub fn new(load_type: PluginLoadType, data: Value) -> Self {
+        Self { load_type, data }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginDescriptor {
     pub name: &'static str,
@@ -24,19 +54,24 @@ impl PluginDescriptor {
     }
 }
 
-/// Common interface implemented by every built-in or third-party Rust plugin.
+#[async_trait]
 pub trait RavaLinkPlugin: Send + Sync {
     fn descriptor(&self) -> PluginDescriptor;
 
-    /// Whether this plugin recognizes the supplied URL or Lavalink search prefix.
     fn supports_identifier(&self, identifier: &str) -> bool;
+
+    /// Resolve a URL or search expression into Lavalink-compatible load data.
+    /// Returning None lets the next registered plugin try the identifier.
+    async fn load_tracks(
+        &self,
+        _identifier: &str,
+    ) -> Result<Option<PluginLoadResult>, PluginError> {
+        Ok(None)
+    }
 }
 
-/// An owned plugin instance. The registry keeps plugins alive for the node lifetime.
 pub type SharedPlugin = Arc<dyn RavaLinkPlugin>;
 
-/// Registry for native plugins. Registration order is preserved and therefore
-/// determines precedence if two plugins claim the same identifier.
 #[derive(Clone, Default)]
 pub struct PluginRegistry {
     plugins: Vec<SharedPlugin>,
@@ -55,11 +90,17 @@ impl PluginRegistry {
     }
 
     pub fn descriptors(&self) -> Vec<PluginDescriptor> {
-        self.plugins.iter().map(|plugin| plugin.descriptor()).collect()
+        self.plugins
+            .iter()
+            .map(|plugin| plugin.descriptor())
+            .collect()
     }
 
     pub fn infos(&self) -> Vec<PluginInfo> {
-        self.descriptors().iter().map(PluginDescriptor::info).collect()
+        self.descriptors()
+            .iter()
+            .map(PluginDescriptor::info)
+            .collect()
     }
 
     pub fn find(&self, identifier: &str) -> Option<SharedPlugin> {
@@ -67,6 +108,21 @@ impl PluginRegistry {
             .iter()
             .find(|plugin| plugin.supports_identifier(identifier))
             .cloned()
+    }
+
+    pub async fn load_tracks(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<PluginLoadResult>, PluginError> {
+        for plugin in &self.plugins {
+            if !plugin.supports_identifier(identifier) {
+                continue;
+            }
+            if let Some(result) = plugin.load_tracks(identifier).await? {
+                return Ok(Some(result));
+            }
+        }
+        Ok(None)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -107,6 +163,7 @@ mod tests {
 
     struct TestPlugin;
 
+    #[async_trait]
     impl RavaLinkPlugin for TestPlugin {
         fn descriptor(&self) -> PluginDescriptor {
             PluginDescriptor {
@@ -120,15 +177,28 @@ mod tests {
         fn supports_identifier(&self, identifier: &str) -> bool {
             identifier.starts_with("test:")
         }
+
+        async fn load_tracks(
+            &self,
+            identifier: &str,
+        ) -> Result<Option<PluginLoadResult>, PluginError> {
+            Ok(Some(PluginLoadResult::new(
+                PluginLoadType::Search,
+                serde_json::json!({"query": identifier}),
+            )))
+        }
     }
 
-    #[test]
-    fn registry_preserves_registration_order_and_routes_identifiers() {
+    #[tokio::test]
+    async fn registry_routes_and_loads_identifiers() {
         let mut registry = PluginRegistry::default();
         registry.register(TestPlugin);
         assert_eq!(registry.len(), 1);
         assert!(registry.find("test:hello").is_some());
         assert!(registry.find("https://example.com").is_none());
         assert_eq!(registry.infos()[0].name, "test");
+        let loaded = registry.load_tracks("test:hello").await.unwrap().unwrap();
+        assert_eq!(loaded.load_type, PluginLoadType::Search);
+        assert_eq!(loaded.data["query"], "test:hello");
     }
 }

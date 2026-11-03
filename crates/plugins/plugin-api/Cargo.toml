@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 ravalink-protocol = { path = "../../protocol" }
+async-trait.workspace = true
+serde_json.workspace = true
