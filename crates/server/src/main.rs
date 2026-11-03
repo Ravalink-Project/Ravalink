@@ -47,7 +47,8 @@ struct DecodeTrackQuery {
 
 #[derive(Deserialize)]
 struct RoutePlannerFreeAddress {
-    address: String,
+    #[serde(rename = "address")]
+    _address: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -948,7 +949,7 @@ mod server_api_tests {
             authorized_headers(),
             State(state()),
             Json(RoutePlannerFreeAddress {
-                address: "203.0.113.1".into(),
+                _address: "203.0.113.1".into(),
             }),
         )
         .await;
