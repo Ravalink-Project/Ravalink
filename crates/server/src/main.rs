@@ -359,6 +359,7 @@ async fn update_player(
         );
     }
 
+    let fields = fields.clone();
     let mut normalized_update = update;
     if encoded_track_is_null {
         let object = normalized_update

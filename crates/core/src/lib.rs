@@ -369,7 +369,8 @@ impl AudioPlayerStore {
         track: AudioTrack,
     ) -> Result<(), AudioError> {
         let player = self.get_or_create(session_id, guild_id).await;
-        player.lock().await.start(track)
+        let mut player = player.lock().await;
+        player.start(track)
     }
 
     pub async fn pause(
@@ -379,7 +380,8 @@ impl AudioPlayerStore {
         paused: bool,
     ) -> Result<(), AudioError> {
         let player = self.get_or_create(session_id, guild_id).await;
-        player.lock().await.pause(paused)
+        let mut player = player.lock().await;
+        player.pause(paused)
     }
 
     pub async fn seek(
@@ -389,7 +391,8 @@ impl AudioPlayerStore {
         position_ms: u64,
     ) -> Result<(), AudioError> {
         let player = self.get_or_create(session_id, guild_id).await;
-        player.lock().await.seek(position_ms)
+        let mut player = player.lock().await;
+        player.seek(position_ms)
     }
 
     pub async fn stop(&self, session_id: &str, guild_id: &str) {
@@ -405,7 +408,8 @@ impl AudioPlayerStore {
         volume: u16,
     ) -> Result<(), AudioError> {
         let player = self.get_or_create(session_id, guild_id).await;
-        player.lock().await.set_volume(volume)
+        let mut player = player.lock().await;
+        player.set_volume(volume)
     }
 
     pub async fn set_filters(&self, session_id: &str, guild_id: &str, filters: Filters) {
@@ -422,13 +426,14 @@ impl AudioPlayerStore {
         let Some(player) = self.get(session_id, guild_id).await else {
             return Ok(None);
         };
-        player.lock().await.process_frame(frame)
+        let mut player = player.lock().await;
+        player.process_frame(frame)
     }
 
     pub async fn snapshot(&self, session_id: &str, guild_id: &str) -> Option<PlayerSnapshot> {
         let player = self.get(session_id, guild_id).await?;
-        let snapshot = player.lock().await.snapshot();
-        Some(snapshot)
+        let player = player.lock().await;
+        Some(player.snapshot())
     }
 
     pub async fn get(

@@ -455,13 +455,18 @@ pub struct PlayerSnapshot {
 ///
 /// This is the engine-side player primitive. It is deliberately independent of
 /// Discord voice transport so it can be tested without a gateway connection.
-#[derive(Default)]
 pub struct NativePlayer {
     track: Option<AudioTrack>,
     paused: bool,
     position_ms: u64,
     volume: u16,
     processor: DspProcessor,
+}
+
+impl Default for NativePlayer {
+    fn default() -> Self {
+        Self::new(Filters::default())
+    }
 }
 
 impl NativePlayer {
