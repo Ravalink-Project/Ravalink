@@ -11,7 +11,7 @@ use ravalink_protocol::{Track, TrackInfo, encode_track};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct YouTubePlugin {
     client: reqwest::Client,
     api_base: String,
@@ -155,6 +155,17 @@ impl YouTubePlugin {
             "provider": "invidious",
         });
         Ok(track)
+    }
+
+    pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, PluginError> {
+        let result = self.search(query).await?;
+        serde_json::from_value(result.data).map_err(|error| {
+            PluginError::new("youtube", format!("invalid search tracks: {error}"))
+        })
+    }
+
+    pub async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
+        self.load_video(video_id).await
     }
 
     async fn search(&self, query: &str) -> Result<PluginLoadResult, PluginError> {
@@ -392,7 +403,7 @@ mod tests {
             YouTubePlugin::search_query("ytsearch:lofi hip hop"),
             Some("lofi hip hop")
         );
-        assert!(YouTubePlugin.is_search("ytmsearch:ambient"));
+        assert!(YouTubePlugin::is_search("ytmsearch:ambient"));
     }
 
     #[test]

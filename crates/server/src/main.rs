@@ -766,12 +766,12 @@ async fn resolve_player_track(
     if let Some(frames) = frames {
         return Ok((track, frames));
     }
-    if track.info.source_name == "youtube" {
+    if matches!(track.info.source_name.as_str(), "youtube" | "spotify" | "applemusic" | "deezer") {
         let uri = track
             .info
             .uri
             .clone()
-            .ok_or_else(|| "YouTube track has no source URI".to_owned())?;
+            .ok_or_else(|| "plugin track has no source URI".to_owned())?;
         return resolve_plugin_audio_track(state, &uri).await;
     }
     if track.info.source_name != "http" {
@@ -818,7 +818,7 @@ async fn resolve_plugin_audio_track(
         .plugin_info
         .get("streamUrl")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "YouTube resolver returned no playable audio URL".to_owned())?;
+        .ok_or_else(|| "native plugin returned no playable audio URL".to_owned())?;
     let resolved = state
         .http_sources
         .resolve(stream_url)

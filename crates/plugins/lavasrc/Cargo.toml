@@ -5,4 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 ravalink-plugin-api = { path = "../plugin-api" }
+ravalink-plugin-youtube = { path = "../youtube" }
+ravalink-protocol = { path = "../../protocol" }
+reqwest.workspace = true
+serde_json.workspace = true

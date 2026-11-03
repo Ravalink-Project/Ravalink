@@ -6,10 +6,10 @@ server. They are separate crates and share the `ravalink-plugin-api` contract.
 | Crate | Lavalink equivalent | Current implementation |
 |---|---|---|
 | `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, audio-format resolution, video search and playlist expansion |
-| `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer URL identification |
+| `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer track metadata with YouTube audio matching |
 | `ravalink-plugin-lavasearch` | LavaSearch | Track, album, artist and playlist search syntax |
 
-The crates are separated so they can be developed, tested, configured and eventually
+The crates are separate so they can be developed, tested, configured and eventually
 distributed independently. They do not load Java `.jar` files and do not require a JVM.
 
 ## YouTube
@@ -19,15 +19,23 @@ The YouTube plugin uses an Invidious-compatible API. By default it connects to
 It resolves video metadata and an audio stream URL, expands playlists, and supports
 `ytsearch:` and `ytmsearch:`.
 
-The current audio path downloads and decodes the resolved stream through the bounded
-HTTP source pipeline. This is an initial functional path, not yet a production-grade
+## LavaSrc
+
+Track links from Spotify, Apple Music and Deezer are resolved to provider metadata,
+then matched against YouTube for a playable audio stream. Track identity and metadata
+remain associated with the original provider in the returned Lavalink track. Album,
+artist and playlist expansion, provider-native search and more advanced matching still
+need implementation.
+
+## Current playback limitation
+
+Resolved media is currently downloaded and decoded through the bounded HTTP source
+pipeline. This is a functional initial playback path, not yet a production-grade
 segmented/live streaming implementation. Availability depends on the configured
-Invidious instance and YouTube's upstream behavior.
+Invidious instance and each provider's upstream behavior.
 
-## Remaining plugin work
+## LavaSearch
 
-LavaSrc still needs provider metadata APIs, collection expansion, cross-provider
-matching and playable-source resolution. LavaSearch still needs the actual search
-providers and structured album/artist/playlist result builders. Their URL and query
-contracts are in place, but those crates are not yet full replacements for their
-Java counterparts.
+The search request syntax is present for tracks, albums, artists and playlists.
+Actual provider-specific search and structured collection result builders remain to
+be implemented.

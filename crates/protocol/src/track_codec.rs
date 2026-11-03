@@ -87,7 +87,7 @@ pub fn decode_track(encoded: &str) -> Result<Track, TrackCodecError> {
             let _probe_info = read_utf(payload, &mut cursor)?;
         }
         "youtube" | "soundcloud" | "bandcamp" | "vimeo" | "twitch" | "nico" | "getyarn"
-        | "yandexmusic" | "beam" => {}
+        | "yandexmusic" | "beam" | "spotify" | "applemusic" | "deezer" => {}
         other => {
             return Err(TrackCodecError::new(format!(
                 "unsupported Lavaplayer source manager: {other}"
@@ -159,7 +159,7 @@ pub fn encode_track_with_source_data(
             write_utf(&mut payload, source_data)?;
         }
         "youtube" | "soundcloud" | "bandcamp" | "vimeo" | "twitch" | "nico" | "getyarn"
-        | "yandexmusic" | "beam" => {}
+        | "yandexmusic" | "beam" | "spotify" | "applemusic" | "deezer" => {}
         other => {
             return Err(TrackCodecError::new(format!(
                 "unsupported Lavaplayer source manager: {other}"
