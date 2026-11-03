@@ -36,6 +36,7 @@ struct AppState {
     metrics_enabled: bool,
     player_update_interval: u64,
     system: Arc<tokio::sync::Mutex<System>>,
+    stats_cache: Arc<tokio::sync::Mutex<Option<(Instant, NodeStats)>>>,
     started_at: Instant,
 }
 
@@ -123,6 +124,7 @@ async fn main() {
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
         system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
+        stats_cache: Arc::new(tokio::sync::Mutex::new(None)),
         started_at: Instant::now(),
     };
 
@@ -235,6 +237,13 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
 }
 
 async fn collect_stats(state: &AppState) -> NodeStats {
+    let mut cache = state.stats_cache.lock().await;
+    if let Some((updated_at, cached)) = cache.as_ref()
+        && updated_at.elapsed() < Duration::from_secs(5)
+    {
+        return cached.clone();
+    }
+
     let mut system = state.system.lock().await;
     system.refresh_all();
     system.refresh_cpu_usage();
@@ -253,7 +262,7 @@ async fn collect_stats(state: &AppState) -> NodeStats {
         .unwrap_or(0.0);
     drop(system);
 
-    NodeStats {
+    let stats = NodeStats {
         frame_stats: None,
         players: state.players.len().await,
         playing_players: state.audio_players.playing_len().await,
@@ -269,7 +278,9 @@ async fn collect_stats(state: &AppState) -> NodeStats {
             system_load,
             lavalink_load: process_load,
         },
-    }
+    };
+    *cache = Some((Instant::now(), stats.clone()));
+    stats
 }
 
 async fn routeplanner_status(headers: HeaderMap, State(state): State<AppState>) -> Response {
@@ -966,6 +977,7 @@ mod server_api_tests {
             metrics_enabled: false,
             player_update_interval: 5,
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
+            stats_cache: Arc::new(tokio::sync::Mutex::new(None)),
             started_at: Instant::now(),
         }
     }
