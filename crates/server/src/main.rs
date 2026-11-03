@@ -241,7 +241,12 @@ async fn info_endpoint(headers: HeaderMap, State(state): State<AppState>) -> Res
         return response;
     }
     let mut source_managers = ServerInfo::default().source_managers;
-    source_managers.push("youtube".to_owned());
+    source_managers.extend([
+        "youtube".to_owned(),
+        "spotify".to_owned(),
+        "applemusic".to_owned(),
+        "deezer".to_owned(),
+    ]);
     let info = ServerInfo {
         plugins: state.plugins.infos(),
         source_managers,

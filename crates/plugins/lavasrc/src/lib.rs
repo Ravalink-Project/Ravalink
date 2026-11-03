@@ -11,7 +11,11 @@ use ravalink_plugin_api::{
 use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{Track, encode_track};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{
+    env,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MusicProvider {
@@ -41,6 +45,7 @@ pub struct ProviderIdentifier {
 pub struct LavaSrcPlugin {
     youtube: YouTubePlugin,
     client: reqwest::Client,
+    spotify_token: Arc<Mutex<Option<(String, Instant)>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +66,7 @@ impl Default for LavaSrcPlugin {
                 .user_agent("RavaLink/0.1 (native LavaSrc adapter)")
                 .build()
                 .expect("valid default HTTP client"),
+            spotify_token: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -306,6 +312,263 @@ impl LavaSrcPlugin {
             .await
     }
 
+    async fn spotify_access_token(&self) -> Result<String, PluginError> {
+        if let Ok(cache) = self.spotify_token.lock()
+            && let Some((token, expires_at)) = cache.as_ref()
+            && *expires_at > Instant::now()
+        {
+            return Ok(token.clone());
+        }
+
+        let client_id = env::var("RAVALINK_SPOTIFY_CLIENT_ID").map_err(|_| {
+            PluginError::new(
+                "lavasrc",
+                "Spotify collection playback requires RAVALINK_SPOTIFY_CLIENT_ID and RAVALINK_SPOTIFY_CLIENT_SECRET",
+            )
+        })?;
+        let client_secret = env::var("RAVALINK_SPOTIFY_CLIENT_SECRET").map_err(|_| {
+            PluginError::new(
+                "lavasrc",
+                "Spotify collection playback requires RAVALINK_SPOTIFY_CLIENT_ID and RAVALINK_SPOTIFY_CLIENT_SECRET",
+            )
+        })?;
+        let response: Value = self
+            .client
+            .post("https://accounts.spotify.com/api/token")
+            .basic_auth(client_id, Some(client_secret))
+            .form(&[("grant_type", "client_credentials")])
+            .send()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Spotify token request failed: {error}"))
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Spotify authentication failed: {error}"))
+            })?
+            .json()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("invalid Spotify token response: {error}"))
+            })?;
+        let token = response
+            .get("access_token")
+            .and_then(Value::as_str)
+            .ok_or_else(|| PluginError::new("lavasrc", "Spotify returned no access token"))?
+            .to_owned();
+        let expires_in = response
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .unwrap_or(3_600);
+        if let Ok(mut cache) = self.spotify_token.lock() {
+            *cache = Some((
+                token.clone(),
+                Instant::now() + Duration::from_secs(expires_in.saturating_sub(60)),
+            ));
+        }
+        Ok(token)
+    }
+
+    async fn spotify_collection(
+        &self,
+        parsed: &ProviderIdentifier,
+    ) -> Result<PluginLoadResult, PluginError> {
+        let token = self.spotify_access_token().await?;
+        let (endpoint, tracks_path, fallback_name) = match parsed.content_type.as_str() {
+            "album" => (
+                format!("https://api.spotify.com/v1/albums/{}?market=US", parsed.id),
+                "/tracks/items",
+                "Spotify album",
+            ),
+            "playlist" => (
+                format!("https://api.spotify.com/v1/playlists/{}?market=US", parsed.id),
+                "/tracks/items",
+                "Spotify playlist",
+            ),
+            "artist" => (
+                format!("https://api.spotify.com/v1/artists/{}/top-tracks?market=US", parsed.id),
+                "/tracks",
+                "Spotify artist top tracks",
+            ),
+            _ => return Err(PluginError::new("lavasrc", "unsupported Spotify collection")),
+        };
+        let data: Value = self
+            .client
+            .get(endpoint)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Spotify collection request failed: {error}"))
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Spotify returned an error: {error}"))
+            })?
+            .json()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("invalid Spotify collection response: {error}"))
+            })?;
+        let items = data
+            .pointer(tracks_path)
+            .and_then(Value::as_array)
+            .ok_or_else(|| PluginError::new("lavasrc", "Spotify collection contains no tracks"))?;
+        let name = data
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(fallback_name)
+            .to_owned();
+        let mut tracks = Vec::new();
+        for item in items.iter().take(15) {
+            let item = item.get("track").unwrap_or(item);
+            if item.is_null() {
+                continue;
+            }
+            let Some(id) = item.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let metadata = ExternalTrack {
+                title: item
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown title")
+                    .to_owned(),
+                author: item
+                    .get("artists")
+                    .and_then(Value::as_array)
+                    .and_then(|artists| artists.first())
+                    .and_then(|artist| artist.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown")
+                    .to_owned(),
+                duration_ms: item.get("duration_ms").and_then(Value::as_u64),
+                artwork_url: item
+                    .get("album")
+                    .and_then(|album| album.get("images"))
+                    .and_then(Value::as_array)
+                    .and_then(|images| images.first())
+                    .and_then(|image| image.get("url"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                isrc: item
+                    .get("external_ids")
+                    .and_then(|ids| ids.get("isrc"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            let track_identifier = ProviderIdentifier {
+                provider: MusicProvider::Spotify,
+                content_type: "track".to_owned(),
+                id: id.to_owned(),
+            };
+            let uri = item
+                .pointer("/external_urls/spotify")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("https://open.spotify.com/track/{id}"));
+            if let Ok(track) = self
+                .match_external_track(&uri, &track_identifier, metadata)
+                .await
+            {
+                tracks.push(track);
+            }
+        }
+        Ok(PluginLoadResult::new(
+            PluginLoadType::Playlist,
+            json!({"info": {"name": name, "selectedTrack": -1}, "tracks": tracks}),
+        ))
+    }
+
+    async fn apple_music_collection(
+        &self,
+        parsed: &ProviderIdentifier,
+    ) -> Result<PluginLoadResult, PluginError> {
+        if parsed.content_type == "playlist" {
+            return Err(PluginError::new(
+                "lavasrc",
+                "Apple Music playlist resolution requires the Apple Music catalog API",
+            ));
+        }
+        let data: Value = self
+            .client
+            .get("https://itunes.apple.com/lookup")
+            .query(&[("id", parsed.id.as_str()), ("entity", "song"), ("limit", "25")])
+            .send()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Apple Music collection request failed: {error}"))
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
+            })?
+            .json()
+            .await
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("invalid Apple Music collection response: {error}"))
+            })?;
+        let items = data
+            .get("results")
+            .and_then(Value::as_array)
+            .ok_or_else(|| PluginError::new("lavasrc", "Apple Music collection contains no results"))?;
+        let name = items
+            .iter()
+            .find_map(|item| {
+                item.get("collectionName")
+                    .or_else(|| item.get("artistName"))
+                    .and_then(Value::as_str)
+            })
+            .unwrap_or("Apple Music collection")
+            .to_owned();
+        let mut tracks = Vec::new();
+        for item in items.iter().filter(|item| {
+            item.get("wrapperType").and_then(Value::as_str) == Some("track")
+        }).take(15) {
+            let Some(id) = item.get("trackId").and_then(Value::as_u64) else {
+                continue;
+            };
+            let metadata = ExternalTrack {
+                title: item
+                    .get("trackName")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown title")
+                    .to_owned(),
+                author: item
+                    .get("artistName")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown")
+                    .to_owned(),
+                duration_ms: item.get("trackTimeMillis").and_then(Value::as_u64),
+                artwork_url: item
+                    .get("artworkUrl100")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                isrc: item.get("isrc").and_then(Value::as_str).map(str::to_owned),
+            };
+            let track_identifier = ProviderIdentifier {
+                provider: MusicProvider::AppleMusic,
+                content_type: "track".to_owned(),
+                id: id.to_string(),
+            };
+            let uri = item
+                .get("trackViewUrl")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("https://music.apple.com/us/song/{id}"));
+            if let Ok(track) = self
+                .match_external_track(&uri, &track_identifier, metadata)
+                .await
+            {
+                tracks.push(track);
+            }
+        }
+        Ok(PluginLoadResult::new(
+            PluginLoadType::Playlist,
+            json!({"info": {"name": name, "selectedTrack": -1}, "tracks": tracks}),
+        ))
+    }
+
     async fn resolve_deezer_collection(
         &self,
         parsed: &ProviderIdentifier,
@@ -456,16 +719,11 @@ impl RavaLinkPlugin for LavaSrcPlugin {
                 serde_json::to_value(track).expect("track serializes"),
             )));
         }
-        if parsed.provider == MusicProvider::Deezer {
-            return self.resolve_deezer_collection(&parsed).await.map(Some);
+        match parsed.provider {
+            MusicProvider::Deezer => self.resolve_deezer_collection(&parsed).await.map(Some),
+            MusicProvider::Spotify => self.spotify_collection(&parsed).await.map(Some),
+            MusicProvider::AppleMusic => self.apple_music_collection(&parsed).await.map(Some),
         }
-        Err(PluginError::new(
-            "lavasrc",
-            format!(
-                "{} collection resolution is not available for this provider yet",
-                parsed.content_type
-            ),
-        ))
     }
 }
 
