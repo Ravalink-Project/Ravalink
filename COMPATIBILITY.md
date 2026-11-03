@@ -9,17 +9,17 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Version | GET /version | Initial implementation |
 | Server info | GET /v4/info with Lavalink v4 field names | Initial implementation; advertises implemented DSP filters |
 | Statistics | GET /v4/stats | Initial implementation; CPU load pending |
-| Load tracks | GET /v4/loadtracks | Route shape only; source adapters pending |
+| Load tracks | GET /v4/loadtracks | Direct HTTP(S) file URLs are fetched, probed, decoded and returned as encoded tracks; search providers and live streams pending |
 | Decode track | GET /v4/decodetrack | Lavaplayer track-info v1-v3 decoding; known built-in source payloads supported |
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
 | WebSocket | User-Id, Client-Name, Session-Id headers and ready event | Initial handshake only |
 | Session update | PATCH /v4/sessions/{sessionId} | Initial implementation |
-| List players | GET /v4/sessions/{sessionId}/players | In-memory state store; no active playback contexts yet |
+| List players | GET /v4/sessions/{sessionId}/players | In-memory player state and per-session/guild native audio-player contexts |
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
-| Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Partial state updates; audio commands are not connected to playback |
-| Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | In-memory state removal |
-| Audio sources | Search, resolve, stream, errors | Not implemented; `/v4/loadtracks` deliberately returns no matches |
-| Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and NativePlayer lifecycle; no continuous source streaming, REST-to-engine playback integration, time-stretch or Opus yet |
+| Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP track resolution loads decoded PCM into NativePlayer; volume, filters, pause, seek and stop update native state; Discord voice output/events still absent |
+| Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
+| Audio sources | Search, resolve, stream, errors | Bounded direct HTTP(S) file resolver only; 128 MiB download cap and 256 MiB decoded PCM cache; no search providers or live stream support |
+| Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and REST-to-NativePlayer loading/control; bounded PCM frame queue; no continuous source streaming, time-stretch or Opus yet |
 | Discord voice | Gateway voice handshake, DAVE, RTP, encryption | Not implemented |
 | Plugins | Native extension API | Not implemented |
 | Prometheus | Configurable metrics endpoint | Not implemented |

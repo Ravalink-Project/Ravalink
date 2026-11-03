@@ -47,7 +47,7 @@ A sample is available at [config/ravalink.example.toml](config/ravalink.example.
 ## Project direction
 
 1. Complete Lavalink v4 protocol, track-codec and session/player semantics.
-2. Implement source resolution, demux/decode, complete filter parity and Opus encoding.
+2. Expand native source resolution beyond direct HTTP(S) files, then complete demux/decode, filter parity and Opus encoding.
 3. Implement Discord voice transport, including DAVE and current voice encryption requirements.
 4. Add a native extension API, observability and compatibility/benchmark suites.
 5. Prove functional parity and measurable performance improvements.
