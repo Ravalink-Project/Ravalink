@@ -108,7 +108,7 @@ impl HttpSourceManager {
 
         let extension = url
             .path_segments()
-            .and_then(|segments| segments.last())
+            .and_then(|mut segments| segments.next_back())
             .and_then(|segment| segment.rsplit_once('.').map(|(_, extension)| extension))
             .map(str::to_ascii_lowercase);
         let probe = probe_name(extension.as_deref(), &content_type)
@@ -261,7 +261,7 @@ fn probe_name(extension: Option<&str>, content_type: &str) -> Option<&'static st
 
 fn media_title(url: &reqwest::Url) -> String {
     url.path_segments()
-        .and_then(|segments| segments.last())
+        .and_then(|mut segments| segments.next_back())
         .filter(|segment| !segment.is_empty())
         .unwrap_or("Untitled audio")
         .to_owned()
