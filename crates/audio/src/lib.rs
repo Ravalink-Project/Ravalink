@@ -571,7 +571,9 @@ impl NativePlayer {
                 return Ok(Some(frame));
             }
             let Some(frame) = self.next_frame()? else {
-                self.voice_packetizer.clear();
+                if self.track.is_none() {
+                    self.voice_packetizer.clear();
+                }
                 return Ok(None);
             };
             self.voice_packetizer.push(&frame)?;
@@ -688,6 +690,9 @@ impl AudioPipeline for NativePlayer {
                 index += 1;
             }
             self.next_frame_index = index;
+        }
+        if let Some(encoder) = self.opus_encoder.as_mut() {
+            encoder.reset()?;
         }
         self.processor.reset_state();
         Ok(())
@@ -853,6 +858,28 @@ mod tests {
         assert_eq!(voice_frame.channels, 2);
         assert_eq!(voice_frame.sample_rate, 48_000);
         assert!(player.next_voice_frame().unwrap().is_none());
+    }
+
+    #[test]
+    fn pausing_preserves_partial_voice_frame_buffer() {
+        let mut player = NativePlayer::default();
+        player
+            .start(AudioTrack {
+                identifier: "short".into(),
+                title: "Short".into(),
+                author: "Test".into(),
+                duration_ms: Some(20),
+                is_stream: false,
+            })
+            .unwrap();
+        player
+            .voice_packetizer
+            .push(&frame(vec![0.1; 960], 2))
+            .unwrap();
+        player.pause(true).unwrap();
+
+        assert!(player.next_voice_frame().unwrap().is_none());
+        assert_eq!(player.voice_packetizer.buffered_samples(), 960);
     }
 
     #[test]

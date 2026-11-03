@@ -373,10 +373,12 @@ impl AudioPlayerStore {
         players
             .entry(key)
             .or_insert_with(|| {
-                Arc::new(tokio::sync::Mutex::new(NativePlayer::new_with_opus_complexity(
-                    Filters::default(),
-                    self.opus_complexity,
-                )))
+                Arc::new(tokio::sync::Mutex::new(
+                    NativePlayer::new_with_opus_complexity(
+                        Filters::default(),
+                        self.opus_complexity,
+                    ),
+                ))
             })
             .clone()
     }
