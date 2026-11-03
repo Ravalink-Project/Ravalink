@@ -73,9 +73,12 @@ mod tests {
         let mut packetizer = RtpPacketizer::new(0x1234_5678, 0x0102, 0x0304_0506);
         let packet = packetizer.packetize(&[0xaa, 0xbb, 0xcc]).unwrap();
 
-        assert_eq!(&packet[..12], &[
-            0x80, 120, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x12, 0x34, 0x56, 0x78,
-        ]);
+        assert_eq!(
+            &packet[..12],
+            &[
+                0x80, 120, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x12, 0x34, 0x56, 0x78,
+            ]
+        );
         assert_eq!(&packet[12..], &[0xaa, 0xbb, 0xcc]);
         assert_eq!(packetizer.sequence(), 0x0103);
         assert_eq!(packetizer.timestamp(), 0x0304_08c6);
@@ -93,6 +96,7 @@ mod tests {
     fn rejects_empty_or_oversized_opus_payloads() {
         let mut packetizer = RtpPacketizer::new(1, 0, 0);
         assert!(packetizer.packetize(&[]).is_err());
-        assert!(packetizer.packetize(&vec![0; MAX_OPUS_PACKET_BYTES + 1]).is_err());
+        let oversized = vec![0; MAX_OPUS_PACKET_BYTES + 1];
+        assert!(packetizer.packetize(&oversized).is_err());
     }
 }
