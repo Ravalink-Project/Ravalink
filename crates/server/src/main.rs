@@ -11,7 +11,7 @@ use axum::{
     routing::{get, post},
 };
 use ravalink_audio::{AudioTrack, HttpSourceManager, PcmFrame};
-use ravalink_core::{AudioPlayerStore, PlayerStore, SessionStore};
+use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, ServerInfo, SessionInfo,
     SessionUpdate, Track, decode_track,
@@ -359,21 +359,48 @@ async fn update_player(
         );
     }
 
-    if query.no_replace
+    let no_replace_active = query.no_replace
         && has_track_request
-        && let Some(player) = state.players.get(&session_id, &guild_id).await
-        && !player["track"].is_null()
-    {
-        return Json(player).into_response();
-    }
+        && state
+            .players
+            .get(&session_id, &guild_id)
+            .await
+            .is_some_and(|player| !player["track"].is_null());
 
-    if fields.contains_key("voice") {
-        return api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "Discord voice transport is not implemented yet",
-            &path,
-        );
-    }
+    let voice_update = if let Some(voice) = fields.get("voice") {
+        if voice.is_null() {
+            Some(None)
+        } else {
+            let Some(voice) = voice.as_object() else {
+                return api_error(StatusCode::BAD_REQUEST, "Voice state must be an object or null", &path);
+            };
+            let (Some(token), Some(endpoint), Some(session_id)) = (
+                voice.get("token").and_then(serde_json::Value::as_str),
+                voice.get("endpoint").and_then(serde_json::Value::as_str),
+                voice.get("sessionId").and_then(serde_json::Value::as_str),
+            ) else {
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "Voice state requires token, endpoint and sessionId strings",
+                    &path,
+                );
+            };
+            if token.is_empty() || endpoint.is_empty() || session_id.is_empty() {
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "Voice state fields cannot be empty",
+                    &path,
+                );
+            }
+            Some(Some(DiscordVoiceState {
+                token: token.to_owned(),
+                endpoint: endpoint.to_owned(),
+                session_id: session_id.to_owned(),
+            }))
+        }
+    } else {
+        None
+    };
     if let Some(end_time) = fields.get("endTime").filter(|value| !value.is_null())
         && end_time.as_u64().is_none_or(|value| value == 0)
     {
@@ -386,7 +413,15 @@ async fn update_player(
 
     let fields = fields.clone();
     let mut normalized_update = update;
-    if has_track_request {
+    if no_replace_active {
+        let object = normalized_update
+            .as_object_mut()
+            .expect("validated JSON object");
+        object.remove("track");
+        object.remove("encodedTrack");
+        object.remove("identifier");
+    }
+    if has_track_request && !no_replace_active {
         let (track, frames) = match resolve_player_track(&state, &fields).await {
             Ok(resolved) => resolved,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
@@ -414,7 +449,9 @@ async fn update_player(
             "track".to_owned(),
             serde_json::to_value(track).expect("Track serializes to JSON"),
         );
-    } else if fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null {
+    } else if !no_replace_active
+        && (fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null)
+    {
         state.audio_players.stop(&session_id, &guild_id).await;
         let object = normalized_update
             .as_object_mut()
@@ -476,6 +513,13 @@ async fn update_player(
             .await
     {
         return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+    }
+
+    if let Some(voice_update) = voice_update {
+        state
+            .audio_players
+            .set_voice_state(&session_id, &guild_id, voice_update)
+            .await;
     }
 
     Json(

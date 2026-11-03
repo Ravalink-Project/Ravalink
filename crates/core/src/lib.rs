@@ -262,19 +262,50 @@ impl PlayerStore {
             .collect()
     }
 
-    pub async fn remove(&self, session_id: &str, guild_id: &str) -> bool {
-        self.players
-            .write()
+    pub async fn set_voice_state(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        voice_state: Option<DiscordVoiceState>,
+    ) {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let mut states = self.voice_states.write().await;
+        if let Some(voice_state) = voice_state {
+            states.insert(key, voice_state);
+        } else {
+            states.remove(&key);
+        }
+    }
+
+    pub async fn voice_state(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+    ) -> Option<DiscordVoiceState> {
+        self.voice_states
+            .read()
             .await
-            .remove(&(session_id.to_owned(), guild_id.to_owned()))
-            .is_some()
+            .get(&(session_id.to_owned(), guild_id.to_owned()))
+            .cloned()
+    }
+
+    pub async fn remove(&self, session_id: &str, guild_id: &str) -> bool {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let removed_player = self.players.write().await.remove(&key).is_some();
+        let removed_voice = self.voice_states.write().await.remove(&key).is_some();
+        removed_player || removed_voice
     }
 
     pub async fn remove_session(&self, session_id: &str) -> usize {
         let mut players = self.players.write().await;
         let before = players.len();
         players.retain(|(session, _), _| session != session_id);
-        before - players.len()
+        let removed = before - players.len();
+        self.voice_states
+            .write()
+            .await
+            .retain(|(session, _), _| session != session_id);
+        removed
     }
 
     pub async fn len(&self) -> usize {
@@ -348,10 +379,18 @@ type PlayerKey = (String, String);
 type SharedNativePlayer = Arc<tokio::sync::Mutex<NativePlayer>>;
 
 /// Native audio players keyed by Lavalink session and Discord guild.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordVoiceState {
+    pub token: String,
+    pub endpoint: String,
+    pub session_id: String,
+}
+
 #[derive(Clone)]
 pub struct AudioPlayerStore {
     players: Arc<RwLock<HashMap<PlayerKey, SharedNativePlayer>>>,
     opus_complexity: u8,
+    voice_states: Arc<RwLock<HashMap<PlayerKey, DiscordVoiceState>>>,
 }
 
 impl Default for AudioPlayerStore {
@@ -365,6 +404,7 @@ impl AudioPlayerStore {
         Self {
             players: Arc::new(RwLock::new(HashMap::new())),
             opus_complexity: opus_complexity.min(10),
+            voice_states: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     async fn get_or_create(&self, session_id: &str, guild_id: &str) -> SharedNativePlayer {
@@ -552,6 +592,26 @@ impl AudioPlayerStore {
 #[cfg(test)]
 mod audio_player_store_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn voice_state_is_stored_and_removed_per_player() {
+        let store = AudioPlayerStore::default();
+        let voice = DiscordVoiceState {
+            token: "voice-token".into(),
+            endpoint: "voice.example:443".into(),
+            session_id: "discord-session".into(),
+        };
+
+        store
+            .set_voice_state("session-a", "guild-a", Some(voice.clone()))
+            .await;
+        assert_eq!(
+            store.voice_state("session-a", "guild-a").await,
+            Some(voice)
+        );
+        assert!(store.remove("session-a", "guild-a").await);
+        assert!(store.voice_state("session-a", "guild-a").await.is_none());
+    }
 
     #[tokio::test]
     async fn native_players_are_isolated_by_session_and_guild() {
