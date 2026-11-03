@@ -33,4 +33,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 opus2 = { version = "0.4", features = ["bundled"] }
 crypto_secretbox = { version = "0.1.1", features = ["salsa20"] }
 getrandom = "0.3"
+aes-gcm = "0.11"
+chacha20poly1305 = "0.11"
 davey = { package = "davey", git = "https://github.com/Snazzah/davey", rev = "1c37646d4c4fa7e69e2fa00cfbe3277d3a7ff3fc" }
