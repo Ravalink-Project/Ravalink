@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use ravalink_core::{PlayerStore, SessionStore};
+use ravalink_core::{AudioPlayerStore, PlayerStore, SessionStore};
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, ServerInfo, SessionInfo,
     SessionUpdate, decode_track,
@@ -26,6 +26,7 @@ struct AppState {
     password: String,
     sessions: SessionStore,
     players: PlayerStore,
+    audio_players: AudioPlayerStore,
     started_at: Instant,
 }
 
@@ -67,17 +68,20 @@ async fn main() {
         password,
         sessions: SessionStore::default(),
         players: PlayerStore::default(),
+        audio_players: AudioPlayerStore::default(),
         started_at: Instant::now(),
     };
 
     let cleanup_sessions = state.sessions.clone();
     let cleanup_players = state.players.clone();
+    let cleanup_audio_players = state.audio_players.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {
             interval.tick().await;
             for session_id in cleanup_sessions.prune_expired().await {
                 cleanup_players.remove_session(&session_id).await;
+                cleanup_audio_players.remove_session(&session_id).await;
             }
         }
     });
@@ -159,7 +163,7 @@ async fn stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
     let value = NodeStats {
         frame_stats: None,
         players: state.players.len().await,
-        playing_players: state.players.playing_len().await,
+        playing_players: state.audio_players.playing_len().await,
         uptime: state.started_at.elapsed().as_millis() as u64,
         memory: MemoryStats {
             free,
@@ -363,6 +367,43 @@ async fn update_player(
         object.remove("encodedTrack");
         object.insert("track".to_owned(), serde_json::Value::Null);
     }
+    if fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null {
+        state.audio_players.stop(&session_id, &guild_id).await;
+    }
+    if let Some(volume) = fields.get("volume") {
+        let Some(volume) = volume.as_u64().and_then(|value| u16::try_from(value).ok()) else {
+            return api_error(StatusCode::BAD_REQUEST, "Volume must be an integer from 0 to 1000", &path);
+        };
+        if let Err(error) = state.audio_players.set_volume(&session_id, &guild_id, volume).await {
+            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+        }
+    }
+    if let Some(filters) = fields.get("filters") {
+        let filters = match serde_json::from_value::<ravalink_protocol::Filters>(filters.clone()) {
+            Ok(filters) => filters,
+            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error.to_string(), &path),
+        };
+        state.audio_players.set_filters(&session_id, &guild_id, filters).await;
+    }
+    if let Some(paused) = fields.get("paused").and_then(serde_json::Value::as_bool) {
+        if state.audio_players.snapshot(&session_id, &guild_id).await
+            .is_some_and(|snapshot| snapshot.track.is_some())
+        {
+            if let Err(error) = state.audio_players.pause(&session_id, &guild_id, paused).await {
+                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+            }
+        }
+    }
+    if let Some(position) = fields.get("position").and_then(serde_json::Value::as_u64) {
+        if state.audio_players.snapshot(&session_id, &guild_id).await
+            .is_some_and(|snapshot| snapshot.track.is_some())
+        {
+            if let Err(error) = state.audio_players.seek(&session_id, &guild_id, position).await {
+                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+            }
+        }
+    }
+
     Json(
         state
             .players
@@ -483,6 +524,7 @@ async fn handle_socket(
     {
         state.sessions.remove(&session_id).await;
         state.players.remove_session(&session_id).await;
+        state.audio_players.remove_session(&session_id).await;
         return;
     }
 
@@ -504,6 +546,7 @@ async fn handle_socket(
     state.sessions.disconnect(&session_id).await;
     if state.sessions.get(&session_id).await.is_none() {
         state.players.remove_session(&session_id).await;
+        state.audio_players.remove_session(&session_id).await;
     }
     info!(%session_id, "WebSocket disconnected");
 }

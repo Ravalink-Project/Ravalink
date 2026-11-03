@@ -1,5 +1,7 @@
 //! Runtime state shared by the protocol and audio layers.
 
+use ravalink_audio::{AudioError, AudioPipeline, AudioTrack, NativePlayer, PcmFrame, PlayerSnapshot};
+use ravalink_protocol::Filters;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -339,3 +341,174 @@ mod player_store_tests {
         assert_eq!(store.len().await, 1);
     }
 }
+
+/// Native audio players keyed by Lavalink session and Discord guild.
+#[derive(Clone, Default)]
+pub struct AudioPlayerStore {
+    players: Arc<RwLock<HashMap<(String, String), Arc<tokio::sync::Mutex<NativePlayer>>>>>,
+}
+
+impl AudioPlayerStore {
+    async fn get_or_create(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+    ) -> Arc<tokio::sync::Mutex<NativePlayer>> {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let mut players = self.players.write().await;
+        players
+            .entry(key)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(NativePlayer::default())))
+            .clone()
+    }
+
+    pub async fn start(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        track: AudioTrack,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        player.lock().await.start(track)
+    }
+
+    pub async fn pause(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        paused: bool,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        player.lock().await.pause(paused)
+    }
+
+    pub async fn seek(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        position_ms: u64,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        player.lock().await.seek(position_ms)
+    }
+
+    pub async fn stop(&self, session_id: &str, guild_id: &str) {
+        if let Some(player) = self.get(session_id, guild_id).await {
+            let _ = player.lock().await.stop();
+        }
+    }
+
+    pub async fn set_volume(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        volume: u16,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        player.lock().await.set_volume(volume)
+    }
+
+    pub async fn set_filters(&self, session_id: &str, guild_id: &str, filters: Filters) {
+        let player = self.get_or_create(session_id, guild_id).await;
+        player.lock().await.set_filters(filters);
+    }
+
+    pub async fn process_frame(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        frame: PcmFrame,
+    ) -> Result<Option<PcmFrame>, AudioError> {
+        let Some(player) = self.get(session_id, guild_id).await else {
+            return Ok(None);
+        };
+        player.lock().await.process_frame(frame)
+    }
+
+    pub async fn snapshot(&self, session_id: &str, guild_id: &str) -> Option<PlayerSnapshot> {
+        let player = self.get(session_id, guild_id).await?;
+        let snapshot = player.lock().await.snapshot();
+        Some(snapshot)
+    }
+
+    pub async fn get(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+    ) -> Option<Arc<tokio::sync::Mutex<NativePlayer>>> {
+        self.players
+            .read()
+            .await
+            .get(&(session_id.to_owned(), guild_id.to_owned()))
+            .cloned()
+    }
+
+    pub async fn remove(&self, session_id: &str, guild_id: &str) -> bool {
+        self.players
+            .write()
+            .await
+            .remove(&(session_id.to_owned(), guild_id.to_owned()))
+            .is_some()
+    }
+
+    pub async fn remove_session(&self, session_id: &str) -> usize {
+        let mut players = self.players.write().await;
+        let before = players.len();
+        players.retain(|(session, _), _| session != session_id);
+        before - players.len()
+    }
+
+    pub async fn len(&self) -> usize {
+        self.players.read().await.len()
+    }
+
+    pub async fn is_empty(&self) -> bool {
+        self.players.read().await.is_empty()
+    }
+
+    pub async fn playing_len(&self) -> usize {
+        let players: Vec<_> = self.players.read().await.values().cloned().collect();
+        let mut count = 0;
+        for player in players {
+            let snapshot = player.lock().await.snapshot();
+            if snapshot.track.is_some() && !snapshot.paused {
+                count += 1;
+            }
+        }
+        count
+    }
+}
+
+#[cfg(test)]
+mod audio_player_store_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn native_players_are_isolated_by_session_and_guild() {
+        let store = AudioPlayerStore::default();
+        let track = AudioTrack {
+            identifier: "track".into(),
+            title: "Title".into(),
+            author: "Artist".into(),
+            duration_ms: Some(60_000),
+            is_stream: false,
+        };
+        store.start("session-a", "guild-a", track).await.unwrap();
+        store.pause("session-a", "guild-a", true).await.unwrap();
+
+        let snapshot = store.snapshot("session-a", "guild-a").await.unwrap();
+        assert!(snapshot.track.is_some());
+        assert!(snapshot.paused);
+        assert!(store.snapshot("session-b", "guild-a").await.is_none());
+        assert_eq!(store.playing_len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn native_player_volume_and_filter_updates_are_scoped() {
+        let store = AudioPlayerStore::default();
+        store.set_volume("s", "g", 250).await.unwrap();
+        store.set_filters("s", "g", Filters::default()).await;
+        assert_eq!(store.snapshot("s", "g").await.unwrap().volume, 250);
+    }
+}
+

@@ -448,6 +448,7 @@ pub struct PlayerSnapshot {
     pub track: Option<AudioTrack>,
     pub paused: bool,
     pub position_ms: u64,
+    pub volume: u16,
 }
 
 /// Per-player playback state and DSP pipeline.
@@ -459,6 +460,7 @@ pub struct NativePlayer {
     track: Option<AudioTrack>,
     paused: bool,
     position_ms: u64,
+    volume: u16,
     processor: DspProcessor,
 }
 
@@ -468,6 +470,7 @@ impl NativePlayer {
             track: None,
             paused: false,
             position_ms: 0,
+            volume: 100,
             processor: DspProcessor::new(filters),
         }
     }
@@ -477,6 +480,7 @@ impl NativePlayer {
             track: self.track.clone(),
             paused: self.paused,
             position_ms: self.position_ms,
+            volume: self.volume,
         }
     }
 
@@ -484,11 +488,23 @@ impl NativePlayer {
         self.processor.set_filters(filters);
     }
 
+    pub fn set_volume(&mut self, volume: u16) -> Result<(), AudioError> {
+        if volume > 1_000 {
+            return Err(AudioError::invalid("player volume must be between 0 and 1000"));
+        }
+        self.volume = volume;
+        Ok(())
+    }
+
     pub fn process_frame(&mut self, mut frame: PcmFrame) -> Result<Option<PcmFrame>, AudioError> {
         if self.track.is_none() || self.paused {
             return Ok(None);
         }
         self.processor.process(&mut frame)?;
+        let gain = f32::from(self.volume) / 100.0;
+        for sample in &mut frame.samples {
+            *sample = (*sample * gain).clamp(-1.0, 1.0);
+        }
         let frame_count = frame.samples.len() / usize::from(frame.channels);
         let elapsed_ms = (frame_count as u64 * 1_000) / u64::from(frame.sample_rate);
         self.position_ms = self.position_ms.saturating_add(elapsed_ms);
