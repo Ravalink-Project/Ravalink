@@ -2,8 +2,8 @@
 
 use crate::AudioError;
 use crypto_secretbox::{
-    aead::{Aead, KeyInit},
     Nonce, XSalsa20Poly1305,
+    aead::{Aead, KeyInit},
 };
 
 const RTP_HEADER_BYTES: usize = 12;
@@ -24,10 +24,7 @@ pub struct VoicePacketEncryptor {
 }
 
 impl VoicePacketEncryptor {
-    pub fn new(
-        secret_key: [u8; 32],
-        mode: VoiceEncryptionMode,
-    ) -> Result<Self, AudioError> {
+    pub fn new(secret_key: [u8; 32], mode: VoiceEncryptionMode) -> Result<Self, AudioError> {
         let cipher = XSalsa20Poly1305::new_from_slice(&secret_key)
             .map_err(|error| AudioError::invalid(format!("invalid voice secret key: {error}")))?;
         Ok(Self {
@@ -44,7 +41,9 @@ impl VoicePacketEncryptor {
     /// Encrypt an RTP packet and append the negotiated mode's nonce suffix.
     pub fn encrypt_rtp_packet(&mut self, packet: &[u8]) -> Result<Vec<u8>, AudioError> {
         if packet.len() <= RTP_HEADER_BYTES || packet[0] >> 6 != 2 {
-            return Err(AudioError::invalid("voice encryption requires a valid RTP v2 packet"));
+            return Err(AudioError::invalid(
+                "voice encryption requires a valid RTP v2 packet",
+            ));
         }
 
         let header = &packet[..RTP_HEADER_BYTES];
@@ -65,8 +64,9 @@ impl VoicePacketEncryptor {
             }
             VoiceEncryptionMode::Xsalsa20Poly1305Suffix => {
                 let mut nonce_bytes = [0_u8; 24];
-                getrandom::fill(&mut nonce_bytes)
-                    .map_err(|error| AudioError::invalid(format!("nonce generation failed: {error}")))?;
+                getrandom::fill(&mut nonce_bytes).map_err(|error| {
+                    AudioError::invalid(format!("nonce generation failed: {error}"))
+                })?;
                 let nonce = Nonce::from_slice(&nonce_bytes);
                 let ciphertext = self
                     .cipher
@@ -116,8 +116,7 @@ mod tests {
     #[test]
     fn lite_mode_appends_a_monotonic_nonce_counter() {
         let mut encryptor =
-            VoicePacketEncryptor::new([7; 32], VoiceEncryptionMode::Xsalsa20Poly1305Lite)
-                .unwrap();
+            VoicePacketEncryptor::new([7; 32], VoiceEncryptionMode::Xsalsa20Poly1305Lite).unwrap();
         let first = encryptor.encrypt_rtp_packet(&rtp_packet()).unwrap();
         let second = encryptor.encrypt_rtp_packet(&rtp_packet()).unwrap();
 
@@ -160,8 +159,7 @@ mod tests {
     #[test]
     fn rejects_non_rtp_input() {
         let mut encryptor =
-            VoicePacketEncryptor::new([1; 32], VoiceEncryptionMode::Xsalsa20Poly1305Lite)
-                .unwrap();
+            VoicePacketEncryptor::new([1; 32], VoiceEncryptionMode::Xsalsa20Poly1305Lite).unwrap();
         assert!(encryptor.encrypt_rtp_packet(&[1, 2, 3]).is_err());
     }
 }
