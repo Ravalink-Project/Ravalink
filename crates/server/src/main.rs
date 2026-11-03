@@ -29,6 +29,7 @@ struct AppState {
     players: PlayerStore,
     audio_players: AudioPlayerStore,
     http_sources: HttpSourceManager,
+    metrics_enabled: bool,
     started_at: Instant,
 }
 
@@ -75,6 +76,7 @@ async fn main() {
             config.audio.max_source_download_bytes,
             config.audio.max_decoded_cache_bytes,
         ),
+        metrics_enabled: config.metrics.prometheus_enabled,
         started_at: Instant::now(),
     };
 
@@ -111,12 +113,41 @@ async fn main() {
         .route("/v4/websocket", get(websocket))
         .with_state(state);
 
+    let app = if config.metrics.prometheus_enabled {
+        app.route(&config.metrics.prometheus_endpoint, get(metrics_endpoint))
+    } else {
+        app
+    };
+
     let socket = format!("{address}:{port}");
     let listener = TcpListener::bind(&socket)
         .await
         .expect("failed to bind listener");
     info!(%socket, "RavaLink native server starting");
     axum::serve(listener, app).await.expect("server failed");
+}
+
+async fn metrics_endpoint(State(state): State<AppState>) -> Response {
+    if !state.metrics_enabled {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let sessions = state.sessions.len().await;
+    let players = state.players.len().await;
+    let playing_players = state.audio_players.playing_len().await;
+    let cache_bytes = state.http_sources.cached_bytes().unwrap_or_default();
+    let uptime_seconds = state.started_at.elapsed().as_secs_f64();
+
+    let body = format!(
+        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_decoded_cache_bytes Decoded PCM bytes currently held by the HTTP source cache.\n# TYPE ravalink_decoded_cache_bytes gauge\nravalink_decoded_cache_bytes {cache_bytes}\n"
+    );
+
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
+        .into_response()
 }
 
 fn authorization_failure(headers: &HeaderMap, state: &AppState) -> Option<Response> {

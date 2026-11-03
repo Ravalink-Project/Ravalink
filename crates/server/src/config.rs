@@ -128,6 +128,17 @@ impl Config {
                 "RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES must be a valid usize".to_owned()
             })?;
         }
+        if config.metrics.prometheus_enabled
+            && (!config.metrics.prometheus_endpoint.starts_with('/')
+                || config.metrics.prometheus_endpoint.starts_with("//")
+                || config.metrics.prometheus_endpoint.contains('?')
+                || config.metrics.prometheus_endpoint.contains('#'))
+        {
+            return Err(
+                "metrics.prometheus_endpoint must be an absolute path without query or fragment"
+                    .to_owned(),
+            );
+        }
         if config.audio.opus_encoding_quality > 10 {
             return Err("audio.opus_encoding_quality must be between 0 and 10".to_owned());
         }
@@ -152,6 +163,19 @@ mod tests {
 
         assert_eq!(config.audio.max_source_download_bytes, 16 * 1024 * 1024);
         assert_eq!(config.audio.max_decoded_cache_bytes, 32 * 1024 * 1024);
+    }
+
+    #[test]
+    fn prometheus_endpoint_must_be_an_absolute_path() {
+        let config: Config = toml::from_str(
+            r#"
+                [metrics]
+                prometheus_enabled = true
+                prometheus_endpoint = "metrics"
+            "#,
+        )
+        .unwrap();
+        assert!(!config.metrics.prometheus_endpoint.starts_with('/'));
     }
 
     #[test]
