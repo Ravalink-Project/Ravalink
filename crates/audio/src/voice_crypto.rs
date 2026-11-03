@@ -1,6 +1,6 @@
 //! Legacy Discord voice RTP encryption modes (XSalsa20-Poly1305).
 
-use crate::AudioError;
+use crate::{AudioError, RtpPacketizer};
 use crypto_secretbox::{
     Nonce, XSalsa20Poly1305,
     aead::{Aead, KeyInit},
@@ -96,6 +96,32 @@ impl VoicePacketEncryptor {
     }
 }
 
+/// Combines RTP sequence/timestamp framing with the negotiated legacy encryptor.
+pub struct VoicePacketPipeline {
+    packetizer: RtpPacketizer,
+    encryptor: VoicePacketEncryptor,
+}
+
+impl VoicePacketPipeline {
+    pub fn new(
+        ssrc: u32,
+        initial_sequence: u16,
+        initial_timestamp: u32,
+        secret_key: [u8; 32],
+        mode: VoiceEncryptionMode,
+    ) -> Result<Self, AudioError> {
+        Ok(Self {
+            packetizer: RtpPacketizer::new(ssrc, initial_sequence, initial_timestamp),
+            encryptor: VoicePacketEncryptor::new(secret_key, mode)?,
+        })
+    }
+
+    pub fn packetize_opus(&mut self, opus_payload: &[u8]) -> Result<Vec<u8>, AudioError> {
+        let rtp_packet = self.packetizer.packetize(opus_payload)?;
+        self.encryptor.encrypt_rtp_packet(&rtp_packet)
+    }
+}
+
 fn lite_nonce_bytes(counter: u32) -> [u8; 24] {
     let mut nonce = [0_u8; 24];
     nonce[..4].copy_from_slice(&counter.to_be_bytes());
@@ -154,6 +180,25 @@ mod tests {
         assert_eq!(first.len(), packet.len() + 16 + 24);
         assert_eq!(second.len(), packet.len() + 16 + 24);
         assert_ne!(&first[first.len() - 24..], &second[second.len() - 24..]);
+    }
+
+    #[test]
+    fn voice_packet_pipeline_frames_and_encrypts_opus_payloads() {
+        let mut pipeline = VoicePacketPipeline::new(
+            0x1234_5678,
+            42,
+            960,
+            [3; 32],
+            VoiceEncryptionMode::Xsalsa20Poly1305Lite,
+        )
+        .unwrap();
+        let packet = pipeline.packetize_opus(&[0xaa, 0xbb, 0xcc]).unwrap();
+
+        assert_eq!(packet[0], 0x80);
+        assert_eq!(packet[1], 120);
+        assert_eq!(&packet[8..12], &0x1234_5678_u32.to_be_bytes());
+        assert_eq!(&packet[packet.len() - 4..], &[0, 0, 0, 0]);
+        assert!(packet.len() > 12 + 16 + 4);
     }
 
     #[test]

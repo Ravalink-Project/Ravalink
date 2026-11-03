@@ -15,7 +15,7 @@ pub mod voice_pcm;
 pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
 pub use opus::OpusFrameEncoder;
 pub use rtp::RtpPacketizer;
-pub use voice_crypto::{VoiceEncryptionMode, VoicePacketEncryptor};
+pub use voice_crypto::{VoiceEncryptionMode, VoicePacketEncryptor, VoicePacketPipeline};
 pub use voice_pcm::{VOICE_FRAME_SAMPLES_PER_CHANNEL, normalize_for_voice};
 
 /// Interleaved floating-point PCM audio.
@@ -555,6 +555,17 @@ impl NativePlayer {
     }
 
     /// Return the next decoded frame after applying the player's DSP chain.
+    /// Build and encrypt the next Discord-compatible legacy voice packet.
+    pub fn next_encrypted_voice_packet(
+        &mut self,
+        pipeline: &mut crate::voice_crypto::VoicePacketPipeline,
+    ) -> Result<Option<Vec<u8>>, AudioError> {
+        let Some(opus_packet) = self.next_opus_packet()? else {
+            return Ok(None);
+        };
+        pipeline.packetize_opus(&opus_packet).map(Some)
+    }
+
     /// Build the next unencrypted RTP packet from the native Opus encoder.
     pub fn next_rtp_packet(
         &mut self,

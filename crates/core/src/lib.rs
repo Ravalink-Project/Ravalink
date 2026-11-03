@@ -2,6 +2,7 @@
 
 use ravalink_audio::{
     AudioError, AudioPipeline, AudioTrack, NativePlayer, PcmFrame, PlayerSnapshot, RtpPacketizer,
+    VoicePacketPipeline,
 };
 use ravalink_protocol::Filters;
 use serde_json::{Value, json};
@@ -468,6 +469,19 @@ impl AudioPlayerStore {
         let player = self.get_or_create(session_id, guild_id).await;
         let mut player = player.lock().await;
         player.load_decoded_track(track, frames)
+    }
+
+    pub async fn next_encrypted_voice_packet(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        pipeline: &mut VoicePacketPipeline,
+    ) -> Result<Option<Vec<u8>>, AudioError> {
+        let Some(player) = self.get(session_id, guild_id).await else {
+            return Ok(None);
+        };
+        let mut player = player.lock().await;
+        player.next_encrypted_voice_packet(pipeline)
     }
 
     pub async fn next_rtp_packet(
