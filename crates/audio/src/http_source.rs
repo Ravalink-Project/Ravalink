@@ -101,7 +101,9 @@ impl HttpSourceManager {
             .await
             .map_err(|error| AudioError::invalid(format!("cannot read HTTP source: {error}")))?;
         if body.len() > MAX_DOWNLOAD_BYTES {
-            return Err(AudioError::invalid("HTTP source exceeds the 128 MiB download limit"));
+            return Err(AudioError::invalid(
+                "HTTP source exceeds the 128 MiB download limit",
+            ));
         }
 
         let extension = url
