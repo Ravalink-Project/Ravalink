@@ -121,11 +121,7 @@ impl HttpSourceManager {
         let source_bytes = body;
         let max_pcm_bytes = self.max_cache_bytes;
         let frames = tokio::task::spawn_blocking(move || {
-            decode_bytes_limited(
-                source_bytes,
-                decode_extension.as_deref(),
-                max_pcm_bytes,
-            )
+            decode_bytes_limited(source_bytes, decode_extension.as_deref(), max_pcm_bytes)
         })
         .await
         .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))??;
