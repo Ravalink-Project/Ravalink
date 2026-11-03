@@ -84,7 +84,6 @@ fn invalid_player_field(
     })
 }
 
-
 #[tokio::main]
 async fn main() {
     let config = config::Config::load().expect("failed to load RavaLink configuration");
@@ -873,7 +872,6 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
     )
         .into_response()
 }
-
 
 #[cfg(test)]
 mod server_api_tests {
