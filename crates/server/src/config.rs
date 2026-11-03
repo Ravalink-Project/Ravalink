@@ -126,7 +126,8 @@ impl Config {
             config.logging.level = value;
         }
         if let Ok(value) = env::var("RAVALINK_AUDIO_BUFFER_DURATION_MS") {
-            config.audio.buffer_duration_ms = parse_env("RAVALINK_AUDIO_BUFFER_DURATION_MS", &value)?;
+            config.audio.buffer_duration_ms =
+                parse_env("RAVALINK_AUDIO_BUFFER_DURATION_MS", &value)?;
         }
         if let Ok(value) = env::var("RAVALINK_AUDIO_FRAME_BUFFER_DURATION_MS") {
             config.audio.frame_buffer_duration_ms =
