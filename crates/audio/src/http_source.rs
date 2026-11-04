@@ -82,6 +82,13 @@ impl HttpSourceManager {
         &self,
         identifier: &str,
     ) -> Result<ResolvedHttpTrack, AudioError> {
+        let _resolve_permit = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.resolve_slots.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| AudioError::invalid("HTTP source resolver is at capacity"))?
+        .map_err(|_| AudioError::invalid("HTTP source resolver is shutting down"))?;
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         let client = self.streaming_client(&url).await?;
@@ -149,9 +156,8 @@ impl HttpSourceManager {
         let permit = self
             .stream_slots
             .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| AudioError::invalid("HTTP stream manager is shutting down"))?;
+            .try_acquire_owned()
+            .map_err(|_| AudioError::invalid("maximum concurrent HTTP streams reached"))?;
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         let client = self.streaming_client(&url).await?;
@@ -291,12 +297,13 @@ impl HttpSourceManager {
     /// This initial adapter buffers the source before decoding. It is intended
     /// for bounded files, not live radio streams or large remote archives.
     pub async fn resolve(&self, identifier: &str) -> Result<ResolvedHttpTrack, AudioError> {
-        let resolve_permit = self
-            .resolve_slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| AudioError::invalid("HTTP source resolver is shutting down"))?;
+        let _resolve_permit = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.resolve_slots.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| AudioError::invalid("HTTP source resolver is at capacity"))?
+        .map_err(|_| AudioError::invalid("HTTP source resolver is shutting down"))?;
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         if !matches!(url.scheme(), "http" | "https") {
@@ -673,6 +680,39 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[tokio::test]
+    async fn metadata_resolution_rejects_excessive_waiters_without_network_access() {
+        let manager = HttpSourceManager::default();
+        let mut permits = Vec::new();
+        for _ in 0..DEFAULT_CONCURRENT_RESOLVES {
+            permits.push(manager.resolve_slots.clone().acquire_owned().await.unwrap());
+        }
+
+        let error = manager
+            .resolve_stream_track("not a URL")
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("resolver is at capacity"));
+        drop(permits);
+    }
+
+    #[tokio::test]
+    async fn progressive_streams_reject_excess_concurrency_without_waiting() {
+        let manager = HttpSourceManager::default();
+        let mut permits = Vec::new();
+        for _ in 0..DEFAULT_CONCURRENT_STREAMS {
+            permits.push(manager.stream_slots.clone().acquire_owned().await.unwrap());
+        }
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+
+        let error = manager
+            .stream_to_channel("not a URL", 1024, 0, sender)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("maximum concurrent HTTP streams"));
+        drop(permits);
     }
 
     #[tokio::test]
