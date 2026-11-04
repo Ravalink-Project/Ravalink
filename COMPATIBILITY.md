@@ -9,7 +9,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Version | GET /version | Initial implementation |
 | Server info | GET /v4/info with Lavalink v4 field names | Initial implementation; advertises implemented DSP filters |
 | Statistics | GET /v4/stats | System and process CPU loads are measured through sysinfo; node stats are cached for five seconds; frame stats are omitted when unavailable |
-| Load tracks | GET /v4/loadtracks | Direct HTTP(S) files plus built-in YouTube, Spotify, Apple Music and Deezer resolution/search; YouTube audio matching supplies playable streams for protected catalog providers; live network streaming remains pending; buffered sources decode incrementally into a bounded PCM queue |
+| Load tracks | GET /v4/loadtracks | Direct HTTP(S) files plus built-in YouTube, Spotify, Apple Music and Deezer resolution/search; YouTube audio matching supplies playable streams for protected catalog providers; direct HTTP(S) sources and plugin stream URLs are opened at player start and decoded progressively through bounded queues; generic URL duration is unknown |
 | Decode track | GET /v4/decodetrack | Lavaplayer track-info v1-v3 decoding; known built-in source payloads supported |
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
 | WebSocket | User-Id, Client-Name, Session-Id headers, ready, stats, player updates and track events | Handshake, session resumption, periodic stats and player-position updates are implemented; TrackStart and TrackEnd (finished, replaced, stopped, cleanup) carry full Track objects and are emitted by the native player lifecycle; TrackException carries the active Track and is emitted for native audio decoding and packet-encoding failures; TrackStuck is emitted once after 10 seconds without playback-position progress and resets when playback resumes; gateway heartbeats are monitored for missing acknowledgements (two heartbeat intervals); reconnect retries session resume with cancellable exponential backoff capped at 30 seconds and a 15-second connect/handshake deadline; multi-client edge cases and live Discord acceptance still need parity tests |
@@ -19,7 +19,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
 | Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP and enabled native-plugin track resolution feed compressed sources through a bounded PCM decoder into NativePlayer; initial and subsequent seeks restart decoding at the requested position while the compressed source remains within the aggregate seek-cache budget; seeking re-decodes from the beginning of the buffered file; volume, filters, pause, stop, replacement and end-time controls update native state; Discord voice output is connected to the native gateway driver; remaining edge cases require client-level acceptance tests |
 | Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
-| Audio sources | Search, resolve, stream, errors | Built-in YouTube, LavaSrc and LavaSearch providers plus a bounded direct HTTP(S) file resolver; compressed source cache (256 MiB default), download cap (128 MiB default), a two-request concurrent resolution limit and a 4 MiB per-decoded-packet PCM allocation ceiling; direct HTTP(S) sources now use a bounded four-chunk compressed-byte bridge and decode while the response is still arriving; no complete compressed file or decoded PCM track is retained, duration is unknown for generic URLs, and the non-seekable stream path currently rejects seeking; DNS resolution is bounded to five seconds, embedded URL credentials are rejected, and stream connections have a 60-second idle timeout |
+| Audio sources | Search, resolve, stream, errors | Built-in YouTube, LavaSrc and LavaSearch providers; legacy buffered helper limits (256 MiB cache, 128 MiB download cap), two concurrent metadata resolutions, up to 128 active progressive streams and a 4 MiB per-decoded-packet PCM allocation ceiling; direct HTTP(S) and plugin URLs use a bounded four-chunk compressed-byte bridge and decode while the response is still arriving; no complete compressed file or decoded PCM track is retained; generic URL duration is unknown and streams cannot be sought after playback begins; initial timestamp offsets are discarded during decode; DNS resolution is bounded to five seconds, embedded URL credentials are rejected, and stream connections have a 60-second idle timeout |
 | Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode with packet-at-a-time callback and bounded Tokio-channel decoder; REST playback feeds NativePlayer through a bounded 8-frame PCM queue with underrun handling and producer backpressure; stateful PCM DSP; bounded compressed-source cache and per-packet PCM allocation ceiling; 48 kHz stereo resampling and 20 ms packetization; native Opus encoding; RTP v2 sequence/timestamp construction |
 | Discord voice | Gateway voice handshake, DAVE, RTP, encryption | Native Voice Gateway v8 identify/resume, heartbeat, UDP IP discovery, encryption-mode negotiation, speaking state, DAVE MLS event handling, DAVE Opus encryption, RTP transport encryption, UDP keepalive and 20 ms audio output are wired together; automated protocol tests pass, but live Discord guild playback and reconnect behavior still require end-to-end validation |
 | Plugins | Native extension API | Rust plugin contract and built-in YouTube, LavaSrc and LavaSearch crates are implemented; optional external Rust extensions can be registered as short-lived child processes through a versioned JSON-over-stdio protocol, with an allowlisted environment, a 4 MiB response cap, two concurrent invocations per extension and a 30-second per-plugin timeout; in-process dynamic library loading and a stable binary ABI are intentionally not provided |
@@ -39,18 +39,15 @@ and failure paths and the same test scenario has been checked against Lavalink v
 
 The direct HTTP(S) playback path now opens the response when the player starts and forwards chunks through a bounded four-item compressed-byte channel into Symphonia's non-seekable demuxer. Decoded PCM is forwarded through the existing bounded eight-frame player queue, so backpressure reaches the HTTP reader and memory use does not scale with track duration. Generic HTTP tracks report unknown duration and are not seekable. Containers that require random access (notably non-fragmented MP4) may still fail in this progressive path and need a range-aware seekable implementation.
 
-The playback queue is bounded and consumed directly by NativePlayer. Direct HTTP and
-plugin-resolved tracks are cached as compressed source bytes. Resolution performs
-a validation/duration decode pass that discards PCM packets instead of retaining the
-whole decoded track. Playback then decodes those bytes on a blocking worker into the
-bounded eight-frame channel, applying backpressure as NativePlayer consumes packets.
-Initial and subsequent positions use a bounded decoder that discards the compressed source's decoded prefix without retaining it. The HTTP response itself is still downloaded fully
-before decoding; this is incremental PCM production from a buffered source, not live
-network streaming. Subsequent seek requests for buffered direct HTTP and built-in
-plugin sources restart the bounded decoder at the requested position while their
-compressed source remains within the aggregate playback seek-cache budget. Seeking
-re-decodes from the beginning of the compressed file; it is not a byte-range or live
-network seek.
+The playback queue is bounded and consumed directly by NativePlayer. Progressive
+HTTP and plugin streams are not cached as complete compressed files: the server
+opens the HTTP response on player start, forwards at most four compressed chunks
+to the demuxer, and forwards decoded PCM into the bounded eight-frame queue.
+Backpressure propagates from NativePlayer to the decoder and HTTP producer.
+Initial timestamp offsets are handled by decoding and discarding the prefix.
+Subsequent seeking is unavailable because the source is non-seekable. The legacy
+buffered decode helper remains available internally for compatibility tests and
+specialized callers, but it is no longer the REST player's default path.
 
 The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are
