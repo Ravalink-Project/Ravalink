@@ -507,7 +507,8 @@ mod tests {
     async fn request_json_fails_over_to_the_next_invidious_instance() {
         let unavailable = one_shot_http_response("503 Service Unavailable", "").await;
         let healthy = one_shot_http_response("200 OK", r#"{"ok":true}"#).await;
-        let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
+        let mut plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
+        plugin.client = reqwest::Client::builder().no_proxy().build().unwrap();
 
         let response = plugin.request_json("/api/v1/health").await.unwrap();
         assert!(response["ok"].as_bool().unwrap());
