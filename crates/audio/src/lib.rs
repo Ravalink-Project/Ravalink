@@ -539,6 +539,15 @@ impl DspProcessor {
             return Ok(());
         }
 
+        // Reject non-finite input before it can poison stateful filter history.
+        // Resetting the chain below also recovers biquad/delay state if a filter
+        // ever produces a non-finite value during processing.
+        if frame.samples.iter().any(|sample| !sample.is_finite()) {
+            frame.samples.fill(0.0);
+            self.reset_state();
+            self.rebuild_state(frame.sample_rate, frame.channels);
+        }
+
         let volume = present(&self.filters.volume)
             .copied()
             .unwrap_or(1.0)
@@ -556,8 +565,15 @@ impl DspProcessor {
         self.apply_distortion(frame);
         self.apply_rotation(frame);
 
-        for sample in &mut frame.samples {
-            *sample = sample.clamp(-1.0, 1.0);
+        if frame.samples.iter().any(|sample| !sample.is_finite()) {
+            // A pathological filter parameter or numerical edge case must not
+            // leak NaN/Inf into Opus or persist in the next frame's DSP state.
+            frame.samples.fill(0.0);
+            self.reset_state();
+        } else {
+            for sample in &mut frame.samples {
+                *sample = sample.clamp(-1.0, 1.0);
+            }
         }
         Ok(())
     }
@@ -1182,6 +1198,19 @@ mod tests {
             channels,
             sample_rate: 48_000,
         }
+    }
+
+    #[test]
+    fn dsp_sanitizes_non_finite_pcm_and_recovers_for_next_frame() {
+        let mut processor = DspProcessor::default();
+        let mut invalid = frame(vec![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.25], 2);
+        processor.process(&mut invalid).unwrap();
+        assert!(invalid.samples.iter().all(|sample| sample.is_finite()));
+        assert_eq!(invalid.samples, vec![0.0; 4]);
+
+        let mut valid = frame(vec![0.25, -0.25], 2);
+        processor.process(&mut valid).unwrap();
+        assert_eq!(valid.samples, vec![0.25, -0.25]);
     }
 
     #[test]
