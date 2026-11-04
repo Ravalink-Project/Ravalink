@@ -5,7 +5,7 @@ server. They are separate crates and share the `ravalink-plugin-api` contract.
 
 | Crate | Lavalink equivalent | Current implementation |
 |---|---|---|
-| `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, AAC audio-format selection, timestamped starts, video search and playlist expansion |
+| `ravalink-plugin-youtube` | YouTube Plugin | Invidious-compatible video metadata, progressive WebM/Opus audio-format selection, timestamped starts, video search and playlist expansion |
 | `ravalink-plugin-lavasrc` | LavaSrc | Spotify, Apple Music and Deezer track metadata with YouTube audio matching; Spotify, Apple Music and Deezer collection expansion |
 | `ravalink-plugin-lavasearch` | LavaSearch | YouTube, Spotify, Apple Music and Deezer track search; Deezer album, artist and playlist discovery |
 

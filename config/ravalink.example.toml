@@ -17,9 +17,9 @@ buffer_duration_ms = 400
 frame_buffer_duration_ms = 5000
 opus_encoding_quality = 10
 resampling_quality = "low"
-# Maximum compressed HTTP(S) source size accepted by the direct-file resolver.
+# Maximum compressed HTTP(S) source size accepted by the legacy buffered resolver.
 max_source_download_bytes = 134217728
-# Maximum decoded PCM retained in the pending loadtracks cache.
+# Maximum compressed source bytes retained by the legacy buffered resolver.
 max_decoded_cache_bytes = 268435456
 # Maximum decoded PCM held by active native players.
 max_active_decoded_pcm_bytes = 268435456
@@ -28,19 +28,24 @@ max_active_decoded_pcm_bytes = 268435456
 prometheus_enabled = false
 prometheus_endpoint = "/metrics"
 
-# Optional out-of-process Rust extensions.
-# Each executable receives {"protocolVersion":1,"identifier":"..."} on stdin
-# and returns a Lavalink PluginLoadResult JSON object (or null) on stdout.
-# Executables run as this server user; only explicitly listed environment
-# variables are passed to them. The executable path must be absolute.
+# Community plugin discovery. Each subdirectory contains a
+# ravalink-plugin.toml manifest and a native executable. Relative executable
+# paths are resolved against the plugin folder. This is not a Java/JAR loader.
+plugin_directory = "plugins"
+
+# Optional direct plugin declarations (alternative to plugin manifests).
+# Each executable receives a versioned JSON request and returns a Lavalink
+# PluginLoadResult JSON object (or null). See docs/plugins/external-process.md.
 #
 # [[plugins]]
 # name = "community-source"
 # version = "1.0.0"
 # description = "Community source integration"
-# capabilities = ["track", "playlist", "search"]
+# capabilities = ["track", "playlist", "search", "source:community"]
 # identifier_prefix = "community:"
 # program = "/opt/ravalink/plugins/community-source"
 # args = ["--stdio"]
 # [plugins.environment]
 # API_TOKEN = "set-this-outside-version-control"
+# [plugins.config]
+# region = "eu"
