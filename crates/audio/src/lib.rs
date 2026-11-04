@@ -1357,7 +1357,9 @@ mod streamed_queue_tests {
         };
         player.load_streamed_track(track, receiver).unwrap();
         sender
-            .send(Err(AudioError::invalid("audio decode failed: malformed media")))
+            .send(Err(AudioError::invalid(
+                "audio decode failed: malformed media",
+            )))
             .await
             .unwrap();
 
