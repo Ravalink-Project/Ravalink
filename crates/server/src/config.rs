@@ -444,7 +444,11 @@ mod tests {
             description: "Community source plugin".into(),
             capabilities: vec!["track".into()],
             identifier_prefix: "community:".into(),
-            program: if cfg!(windows) { r"C:\\opt\\ravalink\\plugins\\community-source".into() } else { "/opt/ravalink/plugins/community-source".into() },
+            program: if cfg!(windows) {
+                r"C:\opt\ravalink\plugins\community-source".into()
+            } else {
+                "/opt/ravalink/plugins/community-source".into()
+            },
             args: Vec::new(),
             environment: std::collections::HashMap::new(),
             config: serde_json::Value::Null,
