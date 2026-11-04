@@ -86,17 +86,22 @@ impl HttpSourceManager {
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         self.validate_url(&url).await?;
         let client = self.streaming_client(&url).await?;
-        let response =
-            tokio::time::timeout(Duration::from_secs(15), client.head(url.clone()).send())
-                .await
-                .map_err(|_| AudioError::invalid("HTTP source metadata request timed out"))?
-                .map_err(|error| {
-                    AudioError::invalid(format!("HTTP source metadata request failed: {error}"))
-                })?
-                .error_for_status()
-                .map_err(|error| {
-                    AudioError::invalid(format!("HTTP source returned an error: {error}"))
-                })?;
+        let response = tokio::time::timeout(
+            Duration::from_secs(15),
+            client
+                .get(url.clone())
+                .header(reqwest::header::RANGE, "bytes=0-0")
+                .send(),
+        )
+        .await
+        .map_err(|_| AudioError::invalid("HTTP source metadata request timed out"))?
+        .map_err(|error| {
+            AudioError::invalid(format!("HTTP source metadata request failed: {error}"))
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            AudioError::invalid(format!("HTTP source returned an error: {error}"))
+        })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
