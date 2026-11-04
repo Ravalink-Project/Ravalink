@@ -361,6 +361,11 @@ fn is_public_ip(address: IpAddr) -> bool {
                 return is_public_ip(IpAddr::V4(mapped));
             }
             let segments = address.segments();
+            // Only globally-routable unicast space is safe for remote media
+            // fetches. Merely excluding RFC 1918/4193 and a few special
+            // prefixes would still admit reserved and protocol-assignment
+            // ranges such as 4000::/3 and 5f00::/16.
+            let global_unicast = segments[0] & 0xe000 == 0x2000;
             let ipv4_compatible = segments[..6].iter().all(|segment| *segment == 0);
             let ipv4_translated =
                 segments[..4].iter().all(|segment| *segment == 0) && segments[4] == 0xffff;
@@ -374,7 +379,8 @@ fn is_public_ip(address: IpAddr) -> bool {
             let ietf_protocol = segments[0] == 0x2001 && segments[1] <= 0x01ff;
             let documentation = (segments[0] == 0x2001 && segments[1] == 0x0db8)
                 || (segments[0] == 0x3fff && segments[1] <= 0x0fff);
-            !address.is_loopback()
+            global_unicast
+                && !address.is_loopback()
                 && !address.is_unspecified()
                 && !address.is_multicast()
                 && !address.is_unique_local()
@@ -540,6 +546,8 @@ mod tests {
             "2001:db8::1",
             "2002:a00:1::1",
             "3fff::1",
+            "4000::1",
+            "5f00::1",
             "fec0::1",
             "fc00::1",
             "fe80::1",
@@ -548,6 +556,7 @@ mod tests {
         }
         assert!(is_public_ip("1.1.1.1".parse().unwrap()));
         assert!(is_public_ip("2606:4700::1111".parse().unwrap()));
+        assert!(is_public_ip("2001:4860:4860::8888".parse().unwrap()));
     }
 
     #[test]
