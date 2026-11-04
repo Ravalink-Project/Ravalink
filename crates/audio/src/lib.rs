@@ -169,12 +169,13 @@ where
         formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint,
     };
 
+    let bytes: std::sync::Arc<[u8]> = bytes.into();
     let mut hint = Hint::new();
     if let Some(extension) = extension {
         hint.with_extension(extension);
     }
     let source = MediaSourceStream::new(
-        Box::new(Cursor::new(bytes.into())),
+        Box::new(Cursor::new(bytes)),
         Default::default(),
     );
     let probed = symphonia::default::get_probe()
