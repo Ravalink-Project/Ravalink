@@ -1811,7 +1811,7 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
 #[cfg(test)]
 mod server_api_tests {
     use super::*;
-    use axum::http::HeaderValue;
+    use axum::{body::to_bytes, http::HeaderValue};
 
     fn state() -> AppState {
         AppState {
@@ -1836,6 +1836,64 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[tokio::test]
+    async fn version_endpoint_enforces_authentication_and_reports_native_version() {
+        let unauthorized = version(HeaderMap::new(), State(state())).await;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let mut invalid_headers = HeaderMap::new();
+        invalid_headers.insert("authorization", HeaderValue::from_static("wrong-password"));
+        let forbidden = version(invalid_headers, State(state())).await;
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+        let response = version(authorized_headers(), State(state())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"4.0.0-ravalink");
+    }
+
+    #[tokio::test]
+    async fn info_endpoint_advertises_builtin_sources_and_plugin_metadata() {
+        let response = info_endpoint(authorized_headers(), State(state())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        for source in ["youtube", "spotify", "applemusic", "deezer"] {
+            assert!(
+                info["sourceManagers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|value| value.as_str() == Some(source)),
+                "missing source manager {source}"
+            );
+        }
+        assert!(info["plugins"].is_array());
+    }
+
+    #[tokio::test]
+    async fn missing_player_uses_lavalink_api_error_shape() {
+        let response = get_player(
+            authorized_headers(),
+            State(state()),
+            Path(("missing-session".into(), "guild".into())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(error["status"], StatusCode::NOT_FOUND.as_u16());
+        assert_eq!(error["error"], "Not Found");
+        assert_eq!(error["message"], "Session not found");
+        assert_eq!(
+            error["path"],
+            "/v4/sessions/missing-session/players/guild"
+        );
+        assert!(error["timestamp"].as_u64().is_some());
     }
 
     #[tokio::test]
