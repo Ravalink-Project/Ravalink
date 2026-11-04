@@ -11,14 +11,14 @@ use ravalink_plugin_api::{
 use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{Track, encode_track};
 use serde_json::{Value, json};
-const MAX_PROVIDER_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-
 use std::{
     collections::HashSet,
     env,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+const MAX_PROVIDER_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MusicProvider {
@@ -74,6 +74,21 @@ impl Default for LavaSrcPlugin {
     }
 }
 
+fn append_bounded_response_chunk(
+    body: &mut Vec<u8>,
+    chunk: &[u8],
+    provider: &str,
+) -> Result<(), PluginError> {
+    if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
+        return Err(PluginError::new(
+            "lavasrc",
+            format!("{provider} response exceeds the 8 MiB limit"),
+        ));
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
 async fn read_json_response(
     mut response: reqwest::Response,
     provider: &str,
@@ -92,13 +107,7 @@ async fn read_json_response(
     while let Some(chunk) = response.chunk().await.map_err(|error| {
         PluginError::new("lavasrc", format!("{provider} response read failed: {error}"))
     })? {
-        if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
-            return Err(PluginError::new(
-                "lavasrc",
-                format!("{provider} response exceeds the 8 MiB limit"),
-            ));
-        }
-        body.extend_from_slice(&chunk);
+        append_bounded_response_chunk(&mut body, &chunk, provider)?;
     }
 
     serde_json::from_slice(&body).map_err(|error| {
@@ -1027,6 +1036,15 @@ fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_response_limit_accepts_exact_limit_and_rejects_overflow() {
+        let mut body = vec![0; MAX_PROVIDER_RESPONSE_BYTES - 1];
+        append_bounded_response_chunk(&mut body, &[1], "test").unwrap();
+        assert_eq!(body.len(), MAX_PROVIDER_RESPONSE_BYTES);
+        assert!(append_bounded_response_chunk(&mut body, &[2], "test").is_err());
+        assert_eq!(body.len(), MAX_PROVIDER_RESPONSE_BYTES);
+    }
 
     #[test]
     fn parses_spotify_track_album_and_playlist_urls() {
