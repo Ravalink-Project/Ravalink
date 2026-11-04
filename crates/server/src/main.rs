@@ -511,7 +511,7 @@ async fn load_tracks(
         return Json(LoadResult::empty()).into_response();
     }
 
-    match state.http_sources.resolve(&query.identifier).await {
+    match state.http_sources.resolve_stream_track(&query.identifier).await {
         Ok(resolved) => Json(LoadResult {
             load_type: "track",
             data: Some(serde_json::to_value(resolved.track).expect("Track serializes to JSON")),
@@ -778,7 +778,7 @@ async fn update_player(
         object.remove("identifier");
     }
     if has_track_request && !no_replace_active {
-        let (track, source) = match resolve_player_track(&state, &fields).await {
+        let (track, stream_url) = match resolve_player_track(&state, &fields).await {
             Ok(resolved) => resolved,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
         };
@@ -793,22 +793,14 @@ async fn update_player(
             .get("position")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(track.info.position);
+        if initial_position_ms > 0 {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "progressive HTTP streams cannot start at a non-zero position",
+                &path,
+            );
+        }
         let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
-        let source_key = (session_id.clone(), guild_id.clone());
-        let previous_source = match state
-            .playback_sources
-            .replace(source_key.clone(), source.clone())
-            .await
-        {
-            Ok(previous) => previous,
-            Err(()) => {
-                return api_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "active playback source cache is full",
-                    &path,
-                );
-            }
-        };
         if let Err(error) = state
             .audio_players
             .load_streamed_track_at(
@@ -820,21 +812,20 @@ async fn update_player(
             )
             .await
         {
-            state
-                .playback_sources
-                .restore(source_key, &source, previous_source)
-                .await;
             return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
         }
-        tokio::spawn(async move {
-            let _ = decode_bytes_to_channel_at(
-                source.bytes,
-                source.extension,
-                source.max_pcm_bytes,
-                initial_position_ms,
-                pcm_sender,
-            )
+        state
+            .playback_sources
+            .remove(&(session_id.clone(), guild_id.clone()))
             .await;
+        let http_sources = state.http_sources.clone();
+        tokio::spawn(async move {
+            if let Err(error) = http_sources
+                .stream_to_channel(&stream_url, 4 * 1024 * 1024, pcm_sender)
+                .await
+            {
+                tracing::warn!(%error, "progressive HTTP audio stream stopped");
+            }
         });
         if let Some(previous) = previous_encoded_track.as_ref() {
             publish_track_end(
@@ -1432,22 +1423,17 @@ async fn seek_player_source(
 async fn resolve_player_track(
     state: &AppState,
     fields: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(Track, CachedHttpSource), String> {
+) -> Result<(Track, String), String> {
     if let Some(identifier) = fields.get("identifier").and_then(serde_json::Value::as_str) {
         if state.plugins.find(identifier).is_some() {
             return resolve_plugin_audio_track(state, identifier).await;
         }
         let resolved = state
             .http_sources
-            .resolve(identifier)
+            .resolve_stream_track(identifier)
             .await
             .map_err(|error| error.message)?;
-        let source = state
-            .http_sources
-            .take_source(&resolved.track.encoded)
-            .map_err(|error| error.message)?
-            .ok_or_else(|| "compressed HTTP audio is no longer cached".to_owned())?;
-        return Ok((resolved.track, source));
+        return Ok((resolved.track, identifier.to_owned()));
     }
 
     let encoded = fields
@@ -1465,13 +1451,6 @@ async fn resolve_player_track(
         track.user_data = user_data.clone();
     }
 
-    let source = state
-        .http_sources
-        .take_source(&track.encoded)
-        .map_err(|error| error.message)?;
-    if let Some(source) = source {
-        return Ok((track, source));
-    }
     if matches!(
         track.info.source_name.as_str(),
         "youtube" | "spotify" | "applemusic" | "deezer"
@@ -1482,10 +1461,10 @@ async fn resolve_player_track(
             .uri
             .clone()
             .ok_or_else(|| "plugin track has no source URI".to_owned())?;
-        let (mut plugin_track, source) = resolve_plugin_audio_track(state, &uri).await?;
+        let (mut plugin_track, stream_url) = resolve_plugin_audio_track(state, &uri).await?;
         plugin_track.info.position = position;
         plugin_track.encoded = encode_track(&plugin_track).map_err(|error| error.message)?;
-        return Ok((plugin_track, source));
+        return Ok((plugin_track, stream_url));
     }
     if track.info.source_name != "http" {
         return Err(format!(
@@ -1500,22 +1479,17 @@ async fn resolve_player_track(
         .ok_or_else(|| "encoded HTTP track has no source URI".to_owned())?;
     let resolved = state
         .http_sources
-        .resolve(&uri)
+        .resolve_stream_track(&uri)
         .await
         .map_err(|error| error.message)?;
-    let source = state
-        .http_sources
-        .take_source(&resolved.track.encoded)
-        .map_err(|error| error.message)?
-        .ok_or_else(|| "compressed HTTP audio is no longer cached".to_owned())?;
     track = resolved.track;
-    Ok((track, source))
+    Ok((track, uri))
 }
 
 async fn resolve_plugin_audio_track(
     state: &AppState,
     identifier: &str,
-) -> Result<(Track, CachedHttpSource), String> {
+) -> Result<(Track, String), String> {
     let result = state
         .plugins
         .load_tracks(identifier)
@@ -1525,24 +1499,17 @@ async fn resolve_plugin_audio_track(
     if result.load_type != ravalink_plugin_api::PluginLoadType::Track {
         return Err("a playable track identifier is required".to_owned());
     }
-    let track: Track = serde_json::from_value(result.data)
+    let mut track: Track = serde_json::from_value(result.data)
         .map_err(|error| format!("plugin returned an invalid track: {error}"))?;
     let stream_url = track
         .plugin_info
         .get("streamUrl")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "native plugin returned no playable audio URL".to_owned())?;
-    let resolved = state
-        .http_sources
-        .resolve(stream_url)
-        .await
-        .map_err(|error| error.message)?;
-    let source = state
-        .http_sources
-        .take_source(&resolved.track.encoded)
-        .map_err(|error| error.message)?
-        .ok_or_else(|| "compressed plugin audio is no longer cached".to_owned())?;
-    Ok((track, source))
+        .ok_or_else(|| "native plugin returned no playable audio URL".to_owned())?
+        .to_owned();
+    track.info.is_stream = true;
+    track.info.is_seekable = false;
+    Ok((track, stream_url))
 }
 
 async fn decode_track_endpoint(
