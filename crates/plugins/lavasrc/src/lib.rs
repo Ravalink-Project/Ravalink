@@ -452,8 +452,7 @@ impl LavaSrcPlugin {
             .error_for_status()
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Spotify authentication failed: {error}"))
-            })?
-            ;
+            })?;
         let response = read_json_response(response, "Spotify").await?;
         let token = response
             .get("access_token")
@@ -522,9 +521,8 @@ impl LavaSrcPlugin {
             .error_for_status()
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Spotify returned an error: {error}"))
-            })?
-            ;
-        let bounded_response = read_json_response(response, "Spotify").await?;
+            })?;
+        let data = read_json_response(response, "Spotify").await?;
         let items = data
             .pointer(tracks_path)
             .and_then(Value::as_array)
@@ -624,8 +622,7 @@ impl LavaSrcPlugin {
             .error_for_status()
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
-            })?
-            ;
+            })?;
         let data = read_json_response(response, "Apple Music").await?;
         let playlist = data
             .pointer("/data/0")
@@ -730,9 +727,8 @@ impl LavaSrcPlugin {
             .error_for_status()
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
-            })?
-            ;
-        let bounded_response = read_json_response(response, "Apple Music").await?;
+            })?;
+        let data = read_json_response(response, "Apple Music").await?;
         let items = data
             .get("results")
             .and_then(Value::as_array)
@@ -827,8 +823,7 @@ impl LavaSrcPlugin {
             .error_for_status()
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Deezer returned an error: {error}"))
-            })?
-            ;
+            })?;
         let data = read_json_response(response, "Deezer").await?;
         if data.get("error").is_some() {
             return Err(PluginError::new(
