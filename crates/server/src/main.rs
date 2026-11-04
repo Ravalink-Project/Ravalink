@@ -15,7 +15,7 @@ use ravalink_audio::{
     decode_bytes_to_channel_at,
 };
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
-use ravalink_plugin_api::PluginRegistry;
+use ravalink_plugin_api::{PluginDescriptor, PluginRegistry, ProcessPlugin};
 use ravalink_plugin_lavasearch::LavaSearchPlugin;
 use ravalink_plugin_lavasrc::LavaSrcPlugin;
 use ravalink_plugin_youtube::YouTubePlugin;
@@ -204,11 +204,25 @@ fn invalid_player_field(
     })
 }
 
-fn built_in_plugins() -> PluginRegistry {
+fn built_in_plugins(external: &[config::ExternalPluginConfig]) -> PluginRegistry {
     let mut plugins = PluginRegistry::default();
     plugins.register(YouTubePlugin::default());
     plugins.register(LavaSrcPlugin::default());
     plugins.register(LavaSearchPlugin::default());
+    for plugin in external {
+        plugins.register(ProcessPlugin::new(
+            PluginDescriptor {
+                name: plugin.name.clone(),
+                version: plugin.version.clone(),
+                description: plugin.description.clone(),
+                capabilities: plugin.capabilities.clone(),
+            },
+            plugin.identifier_prefix.clone(),
+            plugin.program.clone(),
+            plugin.args.clone(),
+            plugin.environment.clone(),
+        ));
+    }
     plugins
 }
 
@@ -242,7 +256,7 @@ async fn main() {
             config.audio.max_decoded_cache_bytes,
         ),
         playback_sources: PlaybackSourceStore::new(config.audio.max_decoded_cache_bytes),
-        plugins: built_in_plugins(),
+        plugins: built_in_plugins(&config.plugins),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
         system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
@@ -1813,7 +1827,7 @@ mod server_api_tests {
             voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_sources: HttpSourceManager::default(),
             playback_sources: PlaybackSourceStore::new(256 * 1024 * 1024),
-            plugins: built_in_plugins(),
+            plugins: built_in_plugins(&[]),
             metrics_enabled: false,
             player_update_interval: 5,
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),

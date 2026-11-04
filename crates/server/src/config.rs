@@ -10,6 +10,23 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub audio: AudioConfig,
     pub metrics: MetricsConfig,
+    pub plugins: Vec<ExternalPluginConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExternalPluginConfig {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    pub identifier_prefix: String,
+    /// Absolute executable path. Shell command strings are intentionally unsupported.
+    pub program: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub environment: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -171,6 +188,7 @@ impl Config {
             config.metrics.prometheus_enabled,
             &config.metrics.prometheus_endpoint,
         )?;
+        validate_plugins(&config.plugins)?;
         Ok(config)
     }
 }
@@ -230,6 +248,48 @@ fn validate_server_password(password: &str) -> Result<(), String> {
 fn validate_player_update_interval(interval: u64) -> Result<(), String> {
     if interval == 0 {
         return Err("server.player_update_interval must be greater than zero".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_plugins(plugins: &[ExternalPluginConfig]) -> Result<(), String> {
+    let mut names = std::collections::HashSet::new();
+    let mut prefixes = std::collections::HashSet::new();
+    for plugin in plugins {
+        let name = plugin.name.trim();
+        if name.is_empty()
+            || plugin.version.trim().is_empty()
+            || plugin.description.trim().is_empty()
+            || plugin.identifier_prefix.trim().is_empty()
+        {
+            return Err("external plugin name, version, description and identifier_prefix must not be empty".to_owned());
+        }
+        if ["youtube", "lavasrc", "lavasearch"]
+            .iter()
+            .any(|reserved| name.eq_ignore_ascii_case(reserved))
+        {
+            return Err(format!("external plugin name '{name}' is reserved"));
+        }
+        if !names.insert(name.to_ascii_lowercase()) {
+            return Err(format!("duplicate external plugin name: {name}"));
+        }
+        if !prefixes.insert(plugin.identifier_prefix.clone()) {
+            return Err(format!(
+                "duplicate external plugin identifier_prefix: {}",
+                plugin.identifier_prefix
+            ));
+        }
+        if !std::path::Path::new(&plugin.program).is_absolute() {
+            return Err(format!(
+                "external plugin '{name}' program must be an absolute executable path"
+            ));
+        }
+        if plugin.capabilities.iter().any(|capability| capability.trim().is_empty()) {
+            return Err(format!("external plugin '{name}' has an empty capability"));
+        }
+        if plugin.environment.keys().any(|key| key.is_empty() || key.contains('=')) {
+            return Err(format!("external plugin '{name}' has an invalid environment key"));
+        }
     }
     Ok(())
 }
@@ -340,6 +400,33 @@ mod tests {
         assert!(validate_metrics_endpoint(true, "/metrics#fragment").is_err());
         assert!(validate_metrics_endpoint(true, "/version").is_err());
         assert!(validate_metrics_endpoint(true, "/v4/stats").is_err());
+    }
+
+    #[test]
+    fn external_plugin_configuration_requires_unique_names_and_absolute_programs() {
+        let valid = ExternalPluginConfig {
+            name: "community-source".into(),
+            version: "1.0.0".into(),
+            description: "Community source plugin".into(),
+            capabilities: vec!["track".into()],
+            identifier_prefix: "community:".into(),
+            program: "/opt/ravalink/plugins/community-source".into(),
+            args: Vec::new(),
+            environment: std::collections::HashMap::new(),
+        };
+        assert!(validate_plugins(std::slice::from_ref(&valid)).is_ok());
+
+        let mut relative = valid.clone();
+        relative.program = "./plugin".into();
+        assert!(validate_plugins(&[relative]).is_err());
+
+        let mut duplicate = valid.clone();
+        duplicate.name = "COMMUNITY-SOURCE".into();
+        assert!(validate_plugins(&[valid.clone(), duplicate]).is_err());
+
+        let mut reserved = valid;
+        reserved.name = "youtube".into();
+        assert!(validate_plugins(&[reserved]).is_err());
     }
 
     #[test]

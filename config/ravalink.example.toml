@@ -27,3 +27,20 @@ max_active_decoded_pcm_bytes = 268435456
 [metrics]
 prometheus_enabled = false
 prometheus_endpoint = "/metrics"
+
+# Optional out-of-process Rust extensions.
+# Each executable receives {"protocolVersion":1,"identifier":"..."} on stdin
+# and returns a Lavalink PluginLoadResult JSON object (or null) on stdout.
+# Executables run as this server user; only explicitly listed environment
+# variables are passed to them. The executable path must be absolute.
+#
+# [[plugins]]
+# name = "community-source"
+# version = "1.0.0"
+# description = "Community source integration"
+# capabilities = ["track", "playlist", "search"]
+# identifier_prefix = "community:"
+# program = "/opt/ravalink/plugins/community-source"
+# args = ["--stdio"]
+# [plugins.environment]
+# API_TOKEN = "set-this-outside-version-control"
