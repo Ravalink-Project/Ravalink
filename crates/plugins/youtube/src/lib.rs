@@ -320,12 +320,13 @@ fn select_audio_format(formats: &[Value]) -> Option<&Value> {
                 .get("type")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let prefer_aac = mime.starts_with("audio/mp4") || mime.contains("mp4a");
+            let prefer_streamable_opus =
+                mime.starts_with("audio/webm") || mime.contains("opus");
             let bitrate = format
                 .get("bitrate")
                 .and_then(Value::as_u64)
                 .unwrap_or_default();
-            (prefer_aac, bitrate)
+            (prefer_streamable_opus, bitrate)
         })
 }
 
@@ -556,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn prefers_aac_audio_when_multiple_codecs_are_available() {
+    fn prefers_streamable_opus_audio_when_multiple_codecs_are_available() {
         let formats = vec![
             json!({"type": "audio/webm; codecs=opus", "bitrate": 160_000, "url": "https://cdn.test/opus"}),
             json!({"type": "audio/mp4; codecs=mp4a.40.2", "bitrate": 96_000, "url": "https://cdn.test/aac"}),
@@ -565,7 +566,7 @@ mod tests {
             select_audio_format(&formats)
                 .and_then(|format| format.get("url"))
                 .and_then(Value::as_str),
-            Some("https://cdn.test/aac")
+            Some("https://cdn.test/opus")
         );
     }
 
