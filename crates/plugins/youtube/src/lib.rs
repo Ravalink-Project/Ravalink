@@ -11,6 +11,11 @@ use ravalink_protocol::{Track, TrackInfo, encode_track};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+const MAX_PROVIDER_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SEARCH_RESULTS: usize = 50;
+const MAX_PLAYLIST_TRACKS: usize = 500;
+const MAX_SEARCH_QUERY_BYTES: usize = 512;
+
 #[derive(Clone)]
 pub struct YouTubePlugin {
     client: reqwest::Client,
@@ -81,7 +86,10 @@ impl YouTubePlugin {
             _ => return None,
         }
 
-        let playlist_id = url.query_value("list").map(str::to_owned);
+        let playlist_id = url
+            .query_value("list")
+            .filter(|id| valid_playlist_id(id))
+            .map(str::to_owned);
         let start_seconds = url
             .query_value("t")
             .and_then(parse_timestamp)
@@ -108,7 +116,7 @@ impl YouTubePlugin {
             .strip_prefix("ytsearch:")
             .or_else(|| identifier.strip_prefix("ytmsearch:"))
             .map(str::trim)
-            .filter(|query| !query.is_empty())
+            .filter(|query| !query.is_empty() && query.len() <= MAX_SEARCH_QUERY_BYTES)
     }
 
     async fn request_json(&self, path: &str) -> Result<Value, PluginError> {
@@ -128,14 +136,40 @@ impl YouTubePlugin {
                     continue;
                 }
             };
-            let body = match response.text().await {
-                Ok(body) => body,
-                Err(error) => {
-                    failures.push(format!("{api_base}: cannot read response: {error}"));
-                    continue;
+            if response
+                .content_length()
+                .is_some_and(|length| length > MAX_PROVIDER_RESPONSE_BYTES as u64)
+            {
+                failures.push(format!(
+                    "{api_base}: response exceeds the {MAX_PROVIDER_RESPONSE_BYTES}-byte limit"
+                ));
+                continue;
+            }
+            let mut body = Vec::new();
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
+                            failures.push(format!(
+                                "{api_base}: response exceeds the {MAX_PROVIDER_RESPONSE_BYTES}-byte limit"
+                            ));
+                            body.clear();
+                            break;
+                        }
+                        body.extend_from_slice(&chunk);
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        failures.push(format!("{api_base}: cannot read response: {error}"));
+                        body.clear();
+                        break;
+                    }
                 }
-            };
-            match serde_json::from_str(&body) {
+            }
+            if body.is_empty() {
+                continue;
+            }
+            match serde_json::from_slice(&body) {
                 Ok(data) => return Ok(data),
                 Err(error) => failures.push(format!("{api_base}: invalid JSON response: {error}")),
             }
@@ -193,6 +227,7 @@ impl YouTubePlugin {
             .ok_or_else(|| PluginError::new("youtube", "search response is not an array"))?;
         let tracks = items
             .iter()
+            .take(MAX_SEARCH_RESULTS)
             .filter_map(|item| track_from_video(item).ok())
             .collect::<Vec<_>>();
         Ok(PluginLoadResult::new(
@@ -211,6 +246,7 @@ impl YouTubePlugin {
             .ok_or_else(|| PluginError::new("youtube", "playlist response has no videos"))?;
         let tracks = videos
             .iter()
+            .take(MAX_PLAYLIST_TRACKS)
             .filter_map(|video| track_from_video(video).ok())
             .collect::<Vec<_>>();
         let name = data
@@ -333,7 +369,8 @@ fn track_from_video(video: &Value) -> Result<Track, PluginError> {
     let video_id = video
         .get("videoId")
         .and_then(Value::as_str)
-        .ok_or_else(|| PluginError::new("youtube", "video result has no videoId"))?;
+        .filter(|id| valid_video_id(id))
+        .ok_or_else(|| PluginError::new("youtube", "video result has no valid videoId"))?;
     let title = video
         .get("title")
         .and_then(Value::as_str)
@@ -419,6 +456,14 @@ fn valid_video_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
+fn valid_playlist_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 struct ParsedUrl<'a> {
     host: String,
     path: &'a str,
@@ -488,6 +533,20 @@ mod tests {
                 "https://third.example".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_malformed_playlist_ids_and_oversized_search_queries() {
+        assert!(
+            YouTubePlugin::parse_identifier(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=bad%2Fid"
+            )
+            .unwrap()
+            .playlist_id
+            .is_none()
+        );
+        let oversized = format!("ytsearch:{}", "x".repeat(MAX_SEARCH_QUERY_BYTES + 1));
+        assert!(YouTubePlugin::search_query(&oversized).is_none());
     }
 
     #[test]

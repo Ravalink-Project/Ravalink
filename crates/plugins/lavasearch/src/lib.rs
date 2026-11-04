@@ -11,10 +11,14 @@ use ravalink_plugin_api::{
 use ravalink_plugin_lavasrc::LavaSrcPlugin;
 use serde_json::{Value, json};
 use std::{
+    collections::HashSet,
     env,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+const MAX_SEARCH_QUERY_BYTES: usize = 512;
+const MAX_COLLECTION_RESULTS: usize = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchProvider {
@@ -67,7 +71,7 @@ impl LavaSearchPlugin {
     pub fn parse_request(identifier: &str) -> Option<SearchRequest> {
         let (prefix, query) = identifier.split_once(':')?;
         let query = query.trim();
-        if query.is_empty() {
+        if query.is_empty() || query.len() > MAX_SEARCH_QUERY_BYTES {
             return None;
         }
         let (provider, kind) = match prefix.to_ascii_lowercase().as_str() {
@@ -246,6 +250,14 @@ impl LavaSearchPlugin {
                 }));
             }
         }
+
+        let mut seen = HashSet::new();
+        results.retain(|item| {
+            let source = item.get("source").and_then(Value::as_str).unwrap_or_default();
+            let id = item.get("id").map(Value::to_string).unwrap_or_default();
+            seen.insert((source.to_owned(), id))
+        });
+        results.truncate(MAX_COLLECTION_RESULTS);
 
         if results.is_empty() {
             return Err(PluginError::new(
@@ -488,6 +500,12 @@ impl RavaLinkPlugin for LavaSearchPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_oversized_search_queries() {
+        let query = format!("ytsearch:{}", "x".repeat(MAX_SEARCH_QUERY_BYTES + 1));
+        assert!(LavaSearchPlugin::parse_request(&query).is_none());
+    }
 
     #[test]
     fn parses_standard_lavalink_search_prefixes() {

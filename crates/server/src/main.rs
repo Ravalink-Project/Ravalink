@@ -35,6 +35,8 @@ use sysinfo::System;
 use tokio::{net::TcpListener, sync::watch};
 use tracing::{info, warn};
 
+const MAX_DECODE_TRACK_BATCH: usize = 1_000;
+
 type VoiceTaskMap = Arc<tokio::sync::Mutex<HashMap<(String, String), watch::Sender<bool>>>>;
 #[derive(Clone)]
 struct PlaybackSourceStore {
@@ -1134,6 +1136,7 @@ async fn run_voice_audio_loop(
     shutdown: &mut watch::Receiver<bool>,
 ) -> bool {
     let mut interval = tokio::time::interval(Duration::from_millis(20));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     interval.tick().await;
     let mut speaking = false;
     let mut last_position_ms = None;
@@ -1601,6 +1604,13 @@ async fn decode_tracks_endpoint(
             "/v4/decodetracks",
         );
     }
+    if encoded.0.len() > MAX_DECODE_TRACK_BATCH {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            &format!("At most {MAX_DECODE_TRACK_BATCH} tracks can be decoded per request"),
+            "/v4/decodetracks",
+        );
+    }
     let mut tracks = Vec::with_capacity(encoded.0.len());
     for value in encoded.0 {
         match decode_track(&value) {
@@ -1888,6 +1898,22 @@ mod server_api_tests {
                 "unexpected HTTP scheme: {identifier}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn decode_tracks_rejects_oversized_batches_before_decoding_entries() {
+        let response = decode_tracks_endpoint(
+            authorized_headers(),
+            State(state()),
+            Json(EncodedTracks(vec!["not-decoded".to_owned(); MAX_DECODE_TRACK_BATCH + 1])),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let error: ApiError = serde_json::from_slice(&body).unwrap();
+        assert!(error.message.contains("At most 1000 tracks"));
+        assert_eq!(error.path, "/v4/decodetracks");
     }
 
     #[tokio::test]

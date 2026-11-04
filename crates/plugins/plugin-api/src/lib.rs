@@ -78,6 +78,8 @@ pub trait RavaLinkPlugin: Send + Sync {
     }
 }
 
+/// Maximum identifier size accepted by the native and process plugin registries.
+pub const MAX_PLUGIN_IDENTIFIER_BYTES: usize = 16 * 1024;
 /// Maximum JSON response accepted from an out-of-process extension.
 pub const MAX_PROCESS_PLUGIN_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum concurrent child-process invocations for each external extension.
@@ -133,6 +135,14 @@ impl RavaLinkPlugin for ProcessPlugin {
     }
 
     async fn load_tracks(&self, identifier: &str) -> Result<Option<PluginLoadResult>, PluginError> {
+        if identifier.len() > MAX_PLUGIN_IDENTIFIER_BYTES {
+            return Err(PluginError::new(
+                self.descriptor.name.clone(),
+                format!(
+                    "identifier exceeds the {MAX_PLUGIN_IDENTIFIER_BYTES}-byte plugin limit"
+                ),
+            ));
+        }
         let _permit = self
             .process_slots
             .clone()
@@ -316,6 +326,14 @@ impl PluginRegistry {
         identifier: &str,
         timeout: Duration,
     ) -> Result<Option<PluginLoadResult>, PluginError> {
+        if identifier.len() > MAX_PLUGIN_IDENTIFIER_BYTES {
+            return Err(PluginError::new(
+                "plugin-registry",
+                format!(
+                    "identifier exceeds the {MAX_PLUGIN_IDENTIFIER_BYTES}-byte plugin limit"
+                ),
+            ));
+        }
         for plugin in &self.plugins {
             if !plugin.supports_identifier(identifier) {
                 continue;
@@ -546,6 +564,17 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
             Ok(None)
         }
+    }
+
+    #[tokio::test]
+    async fn registry_rejects_oversized_identifiers_before_dispatch() {
+        let registry = PluginRegistry::default();
+        let identifier = "x".repeat(MAX_PLUGIN_IDENTIFIER_BYTES + 1);
+        let error = registry
+            .load_tracks_with_timeout(&identifier, Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("identifier exceeds"));
     }
 
     #[tokio::test]
