@@ -1643,14 +1643,16 @@ mod tests {
         .unwrap();
         let mut processor = DspProcessor::new(filters);
         let input = (0..480)
-            .map(|sample| {
-                (std::f32::consts::TAU * 1_000.0 * sample as f32 / 48_000.0).sin() * 0.25
-            })
+            .map(|sample| (std::f32::consts::TAU * 1_000.0 * sample as f32 / 48_000.0).sin() * 0.25)
             .collect::<Vec<_>>();
         let input_energy = input.iter().map(|sample| sample * sample).sum::<f32>();
         let mut output = frame(input, 1);
         processor.process(&mut output).unwrap();
-        let output_energy = output.samples.iter().map(|sample| sample * sample).sum::<f32>();
+        let output_energy = output
+            .samples
+            .iter()
+            .map(|sample| sample * sample)
+            .sum::<f32>();
         assert!(output_energy > input_energy);
     }
 
@@ -1688,7 +1690,12 @@ mod tests {
         let mut input = frame(vec![0.1, -0.1, 0.5, -0.5], 2);
         processor.process(&mut input).unwrap();
         assert!(input.samples.iter().all(|sample| sample.is_finite()));
-        assert!(input.samples.iter().all(|sample| (-1.0..=1.0).contains(sample)));
+        assert!(
+            input
+                .samples
+                .iter()
+                .all(|sample| (-1.0..=1.0).contains(sample))
+        );
         assert_ne!(input.samples, vec![0.1, -0.1, 0.5, -0.5]);
     }
 
