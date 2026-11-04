@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use std::{env, fs, path::PathBuf};
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub server: ServerConfig,
@@ -17,6 +17,19 @@ pub struct Config {
 
 fn default_plugin_directory() -> PathBuf {
     PathBuf::from("plugins")
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            logging: LoggingConfig::default(),
+            audio: AudioConfig::default(),
+            metrics: MetricsConfig::default(),
+            plugin_directory: default_plugin_directory(),
+            plugins: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

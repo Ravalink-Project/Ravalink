@@ -536,6 +536,46 @@ mod tests {
         assert_eq!(loaded.data["query"], "ok");
     }
 
+    #[test]
+    fn plugin_directory_discovers_manifests_and_resolves_relative_binaries() {
+        use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("ravalink-plugin-test-{nonce}"));
+        let plugin_dir = root.join("community-source");
+        fs::create_dir_all(plugin_dir.join("bin")).unwrap();
+        let executable = plugin_dir.join("bin").join("community-source");
+        fs::write(&executable, b"test executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(
+            plugin_dir.join("ravalink-plugin.toml"),
+            r#"
+                name = "community-source"
+                version = "1.0.0"
+                description = "Community source"
+                capabilities = ["track", "search"]
+                identifier_prefix = "community:"
+                program = "bin/community-source"
+            "#,
+        )
+        .unwrap();
+
+        let mut registry = PluginRegistry::default();
+        assert_eq!(registry.load_directory(&root).unwrap(), 1);
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.infos()[0].name, "community-source");
+        assert!(registry.find("community:track").is_some());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn registry_routes_and_loads_identifiers() {
         let mut registry = PluginRegistry::default();
