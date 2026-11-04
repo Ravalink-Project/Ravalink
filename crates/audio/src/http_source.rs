@@ -98,9 +98,7 @@ impl HttpSourceManager {
             AudioError::invalid(format!("HTTP source metadata request failed: {error}"))
         })?
         .error_for_status()
-        .map_err(|error| {
-            AudioError::invalid(format!("HTTP source returned an error: {error}"))
-        })?;
+        .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -157,17 +155,17 @@ impl HttpSourceManager {
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         let client = self.streaming_client(&url).await?;
-        let mut response = tokio::time::timeout(
-            Duration::from_secs(15),
-            client.get(url.clone()).send(),
-        )
-        .await
-        .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
-        .map_err(|error| AudioError::invalid(format!("HTTP source request failed: {error}")))?
-        .error_for_status()
-        .map_err(|error| {
-            AudioError::invalid(format!("HTTP source returned an error: {error}"))
-        })?;
+        let mut response =
+            tokio::time::timeout(Duration::from_secs(15), client.get(url.clone()).send())
+                .await
+                .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
+                .map_err(|error| {
+                    AudioError::invalid(format!("HTTP source request failed: {error}"))
+                })?
+                .error_for_status()
+                .map_err(|error| {
+                    AudioError::invalid(format!("HTTP source returned an error: {error}"))
+                })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -687,7 +685,10 @@ mod tests {
         let manager = HttpSourceManager::new(64);
         let clone = manager.clone();
         assert_eq!(manager.resolve_slots.available_permits(), 2);
-        assert_eq!(manager.stream_slots.available_permits(), DEFAULT_CONCURRENT_STREAMS);
+        assert_eq!(
+            manager.stream_slots.available_permits(),
+            DEFAULT_CONCURRENT_STREAMS
+        );
 
         let first = manager.resolve_slots.clone().try_acquire_owned().unwrap();
         let second = clone.resolve_slots.clone().try_acquire_owned().unwrap();
