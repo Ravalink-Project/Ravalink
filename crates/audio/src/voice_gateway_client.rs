@@ -409,19 +409,47 @@ async fn run_voice_gateway_socket(
             break;
         }
 
-        match resume_voice_gateway(&endpoint, &mut machine, &dave, &mut shutdown).await {
-            Ok((resumed_socket, resumed_heartbeat)) => {
-                socket = resumed_socket;
-                heartbeat = resumed_heartbeat;
-                tracing::info!("Discord voice websocket session resumed");
+        let mut retry_delay = Duration::from_secs(1);
+        let mut resumed = false;
+        loop {
+            match resume_voice_gateway(&endpoint, &mut machine, &dave, &mut shutdown).await {
+                Ok((resumed_socket, resumed_heartbeat)) => {
+                    socket = resumed_socket;
+                    heartbeat = resumed_heartbeat;
+                    tracing::info!("Discord voice websocket session resumed");
+                    resumed = true;
+                    break;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        retry_in_ms = retry_delay.as_millis(),
+                        "Discord voice session resume failed; retrying"
+                    );
+                    tokio::select! {
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow() {
+                                break;
+                            }
+                        }
+                        _ = tokio::time::sleep(retry_delay) => {}
+                    }
+                    if *shutdown.borrow() {
+                        break;
+                    }
+                    retry_delay = next_resume_backoff(retry_delay);
+                }
             }
-            Err(error) => {
-                tracing::warn!(%error, "Discord voice session resume failed");
-                break;
-            }
+        }
+        if !resumed {
+            break;
         }
     }
     connected.store(false, Ordering::Release);
+}
+
+fn next_resume_backoff(current: Duration) -> Duration {
+    current.saturating_mul(2).min(Duration::from_secs(30))
 }
 
 async fn resume_voice_gateway(
@@ -586,13 +614,30 @@ fn unix_time_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::encode_dave_binary_frame;
+    use super::{encode_dave_binary_frame, next_resume_backoff};
+    use std::time::Duration;
 
     #[test]
     fn client_dave_binary_messages_start_with_the_opcode_without_server_sequence() {
         assert_eq!(
             encode_dave_binary_frame(26, &[0xaa, 0xbb]),
             vec![26, 0xaa, 0xbb]
+        );
+    }
+
+    #[test]
+    fn voice_gateway_resume_backoff_doubles_and_caps_at_thirty_seconds() {
+        assert_eq!(
+            next_resume_backoff(Duration::from_secs(1)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            next_resume_backoff(Duration::from_secs(16)),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            next_resume_backoff(Duration::from_secs(30)),
+            Duration::from_secs(30)
         );
     }
 }
