@@ -2,7 +2,7 @@ name: Native build
 
 on:
   push:
-    branches: ["rust-native"]
+    branches: ["master"]
     paths-ignore:
       - "**.md"
       - "docs/**"
