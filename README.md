@@ -1,12 +1,13 @@
 # RavaLink
 
 RavaLink is a native Rust audio node targeting drop-in compatibility with the
-Lavalink v4 server API. The long-term goal is to let existing clients such as
-Wavelink, Lavalink.py, Shoukaku and discord-player connect by changing only the
-node address.
+Lavalink v4 server API. The goal is to let existing clients such as Wavelink,
+Lavalink.py, Shoukaku and discord-player connect by changing only the node
+address.
 
 **RavaLink is under active development and is not yet a drop-in replacement.**
-See [COMPATIBILITY.md](COMPATIBILITY.md) for the implementation status.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for the implementation status and
+known compatibility gaps.
 
 ## Native runtime
 
@@ -80,15 +81,33 @@ The default Compose port binding is localhost-only. See [Docker deployment](docs
 
 ## Project direction
 
-1. Finish the remaining Lavalink v4 REST/WebSocket edge cases and verify them against upstream acceptance scenarios.
-2. Replace whole-file buffering with a segmented, back-pressured streaming demux/decode pipeline.
-3. Validate configured Invidious failover under provider outages and rate limits, then expand to provider-independent YouTube extraction.
-4. Design stable external Rust plugin distribution/loading without exposing an unsafe Rust ABI.
-5. Expand end-to-end Discord voice, compatibility and performance testing on real nodes and multiple client libraries.
+The implementation already includes a bounded progressive source pipeline, a native
+audio decode/encode path, Discord voice transport and the built-in provider/plugin
+crates. These components still require systematic contract and failure-path
+coverage; their presence in the codebase is not, by itself, proof of full
+Lavalink compatibility.
+
+The pre-RC1 work is focused on:
+
+1. Completing and verifying the full public Lavalink v4 REST and WebSocket contract,
+   including response schemas, status codes, events, session behavior and edge cases.
+2. Running compatibility scenarios against upstream Lavalink v4 and supported client
+   libraries, with no RavaLink-specific client changes.
+3. Closing the remaining audio, source, provider, voice/DAVE and plugin behavior gaps
+   that can be validated in automated tests.
+4. Exercising resource limits, cancellation, malformed input, provider failures and
+   reconnect paths in repeatable tests.
+5. Keeping Linux x86_64, Linux ARM64 and Docker builds continuously validated on
+   the active `master` branch.
+
+The first release candidate is intended to be a usable test build, not a feature
+preview: the base Lavalink v4 API and all advertised core operations must be
+implemented and covered by automated tests before RC1. Real Discord guild,
+provider-account and network-condition acceptance testing will then be performed
+during the RC cycle.
 
 Rust itself is not treated as proof of performance. Benchmarks must compare both
 nodes on the same hardware and workloads.
-
 
 ## Release readiness
 
