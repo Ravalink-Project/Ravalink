@@ -84,7 +84,6 @@ impl HttpSourceManager {
     ) -> Result<ResolvedHttpTrack, AudioError> {
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
-        self.validate_url(&url).await?;
         let client = self.streaming_client(&url).await?;
         let response = tokio::time::timeout(
             Duration::from_secs(15),
@@ -157,17 +156,18 @@ impl HttpSourceManager {
             .map_err(|_| AudioError::invalid("HTTP stream manager is shutting down"))?;
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
-        self.validate_url(&url).await?;
         let client = self.streaming_client(&url).await?;
-        let mut response = client
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(|error| AudioError::invalid(format!("HTTP source request failed: {error}")))?
-            .error_for_status()
-            .map_err(|error| {
-                AudioError::invalid(format!("HTTP source returned an error: {error}"))
-            })?;
+        let mut response = tokio::time::timeout(
+            Duration::from_secs(15),
+            client.get(url.clone()).send(),
+        )
+        .await
+        .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
+        .map_err(|error| AudioError::invalid(format!("HTTP source request failed: {error}")))?
+        .error_for_status()
+        .map_err(|error| {
+            AudioError::invalid(format!("HTTP source returned an error: {error}"))
+        })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -238,7 +238,7 @@ impl HttpSourceManager {
         network_result
     }
 
-    async fn validate_url(&self, url: &reqwest::Url) -> Result<(), AudioError> {
+    async fn streaming_client(&self, url: &reqwest::Url) -> Result<reqwest::Client, AudioError> {
         if !matches!(url.scheme(), "http" | "https") {
             return Err(AudioError::invalid(
                 "only HTTP and HTTPS media URLs are supported",
@@ -273,7 +273,14 @@ impl HttpSourceManager {
                 "HTTP source host resolves to a private or reserved network address",
             ));
         }
-        Ok(())
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .user_agent("RavaLink/0.1 native-audio")
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .resolve_to_addrs(host, &addresses)
+            .build()
+            .map_err(|error| AudioError::invalid(format!("cannot build HTTP client: {error}")))
     }
 
     async fn streaming_client(&self, url: &reqwest::Url) -> Result<reqwest::Client, AudioError> {
@@ -680,6 +687,25 @@ fn media_title(url: &reqwest::Url) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn progressive_stream_resolution_rejects_credentials_and_non_http_schemes() {
+        let manager = HttpSourceManager::default();
+        for (identifier, expected) in [
+            (
+                "https://user:secret@example.com/audio.mp3",
+                "must not embed credentials",
+            ),
+            ("file:///etc/passwd", "only HTTP and HTTPS"),
+        ] {
+            let error = manager.resolve_stream_track(identifier).await.unwrap_err();
+            assert!(
+                error.message.contains(expected),
+                "unexpected error for {identifier}: {}",
+                error.message
+            );
+        }
+    }
 
     #[tokio::test]
     async fn rejects_embedded_http_credentials_before_network_access() {
