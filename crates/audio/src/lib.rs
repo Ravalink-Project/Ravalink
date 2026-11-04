@@ -1682,6 +1682,54 @@ mod streamed_queue_tests {
     }
 
     #[tokio::test]
+    async fn progressive_decoder_emits_pcm_before_requiring_a_buffered_file() {
+        let mut wav = Vec::new();
+        let samples: Vec<i16> = (0..4_800).map(|sample| (sample % 128) as i16).collect();
+        let data_len = (samples.len() * 2) as u32;
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&48_000_u32.to_le_bytes());
+        wav.extend_from_slice(&192_000_u32.to_le_bytes());
+        wav.extend_from_slice(&4_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for sample in samples {
+            wav.extend_from_slice(&sample.to_le_bytes());
+        }
+
+        let (compressed_sender, compressed_receiver) = tokio::sync::mpsc::channel(1);
+        let (pcm_sender, mut pcm_receiver) = tokio::sync::mpsc::channel(8);
+        let decoder = tokio::spawn(async move {
+            decode_stream_to_channel(
+                compressed_receiver,
+                Some("wav".into()),
+                1024 * 1024,
+                pcm_sender,
+            )
+            .await
+        });
+        for chunk in wav.chunks(64) {
+            compressed_sender.send(Ok(chunk.to_vec())).await.unwrap();
+        }
+        drop(compressed_sender);
+
+        let mut decoded_frames = 0;
+        while let Some(frame) = pcm_receiver.recv().await {
+            let frame = frame.unwrap();
+            assert_eq!(frame.channels, 2);
+            assert_eq!(frame.sample_rate, 48_000);
+            decoded_frames += 1;
+        }
+        decoder.await.unwrap().unwrap();
+        assert!(decoded_frames > 0);
+    }
+
+    #[tokio::test]
     async fn native_player_consumes_bounded_stream_and_completes_on_channel_close() {
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let mut player = NativePlayer::default();
