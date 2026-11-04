@@ -447,6 +447,7 @@ mod tests {
             program: "/opt/ravalink/plugins/community-source".into(),
             args: Vec::new(),
             environment: std::collections::HashMap::new(),
+            config: serde_json::Value::Null,
         };
         assert!(validate_plugins(std::slice::from_ref(&valid)).is_ok());
 
