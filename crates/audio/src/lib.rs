@@ -423,7 +423,9 @@ pub async fn decode_stream_to_channel_at(
         let decoded =
             decode_media_source_with(source, extension.as_deref(), max_pcm_bytes, |mut frame| {
                 if frame.channels == 0 || frame.sample_rate == 0 {
-                    return Err(AudioError::invalid("streamed PCM frame has an invalid layout"));
+                    return Err(AudioError::invalid(
+                        "streamed PCM frame has an invalid layout",
+                    ));
                 }
                 let channels = usize::from(frame.channels);
                 let frame_samples = frame.samples.len() / channels;
@@ -432,7 +434,8 @@ pub async fn decode_stream_to_channel_at(
                 if elapsed_samples < target_samples {
                     let samples_to_skip = target_samples
                         .saturating_sub(elapsed_samples)
-                        .min(frame_samples as u64) as usize;
+                        .min(frame_samples as u64)
+                        as usize;
                     frame.samples.drain(..samples_to_skip * channels);
                     elapsed_samples = elapsed_samples.saturating_add(frame_samples as u64);
                 }
