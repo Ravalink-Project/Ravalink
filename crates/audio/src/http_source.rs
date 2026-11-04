@@ -240,6 +240,16 @@ impl HttpSourceManager {
         frames: Vec<PcmFrame>,
         bytes: usize,
     ) -> Result<(), AudioError> {
+        // An entry larger than the entire cache can never fit. Reject it
+        // before evicting useful entries; otherwise the old loop would empty
+        // the cache and still insert an oversized allocation.
+        if bytes > self.max_cache_bytes {
+            return Err(AudioError::invalid(format!(
+                "decoded HTTP source requires {bytes} cache bytes, exceeding the configured {} byte limit",
+                self.max_cache_bytes
+            )));
+        }
+
         let mut cache = self
             .cache
             .lock()
@@ -356,6 +366,29 @@ mod tests {
         assert_eq!(manager.cached_bytes().unwrap(), 12);
         assert!(manager.take_frames("first").unwrap().is_none());
         assert!(manager.take_frames("second").unwrap().is_some());
+        assert_eq!(manager.cached_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn rejects_entries_larger_than_the_entire_cache_without_evicting_or_caching_them() {
+        let manager = HttpSourceManager::new(16);
+        let frame = PcmFrame {
+            samples: vec![0.1, 0.2],
+            channels: 2,
+            sample_rate: 48_000,
+        };
+        manager
+            .insert_cache("kept".into(), vec![frame.clone()], 8)
+            .unwrap();
+
+        let error = manager
+            .insert_cache("oversized".into(), vec![frame], 17)
+            .unwrap_err();
+
+        assert!(error.message.contains("exceeding the configured 16 byte limit"));
+        assert_eq!(manager.cached_bytes().unwrap(), 8);
+        assert!(manager.take_frames("oversized").unwrap().is_none());
+        assert!(manager.take_frames("kept").unwrap().is_some());
         assert_eq!(manager.cached_bytes().unwrap(), 0);
     }
 
