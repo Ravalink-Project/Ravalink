@@ -389,7 +389,7 @@ async fn version(headers: HeaderMap, State(state): State<AppState>) -> Response 
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
-    "4.0.0-ravalink".into_response()
+    "4.0.0".into_response()
 }
 
 async fn info_endpoint(headers: HeaderMap, State(state): State<AppState>) -> Response {
@@ -1937,7 +1937,7 @@ mod server_api_tests {
         let response = version(authorized_headers(), State(state())).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(&body[..], b"4.0.0-ravalink");
+        assert_eq!(&body[..], b"4.0.0");
     }
 
     #[tokio::test]
