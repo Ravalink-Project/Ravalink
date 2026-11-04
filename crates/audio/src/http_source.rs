@@ -362,6 +362,8 @@ fn is_public_ip(address: IpAddr) -> bool {
             }
             let segments = address.segments();
             let ipv4_compatible = segments[..6].iter().all(|segment| *segment == 0);
+            let ipv4_translated = segments[..4].iter().all(|segment| *segment == 0)
+                && segments[4] == 0xffff;
             let nat64_well_known =
                 segments[0] == 0x0064
                     && segments[1] == 0xff9b
@@ -380,6 +382,7 @@ fn is_public_ip(address: IpAddr) -> bool {
                 && !address.is_unique_local()
                 && !address.is_unicast_link_local()
                 && !ipv4_compatible
+                && !ipv4_translated
                 && !nat64_well_known
                 && !nat64_local_use
                 && !discard_only
@@ -509,6 +512,7 @@ mod tests {
             "::1",
             "::a00:1",
             "::ffff:10.0.0.1",
+            "::ffff:0:0:0:a00:1",
             "64:ff9b::a00:1",
             "64:ff9b:1::a00:1",
             "100::1",
