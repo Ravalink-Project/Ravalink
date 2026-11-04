@@ -158,7 +158,7 @@ impl RavaLinkPlugin for ProcessPlugin {
             })?;
         drop(stdin);
 
-        let mut stdout = child.stdout.take().ok_or_else(|| {
+        let stdout = child.stdout.take().ok_or_else(|| {
             PluginError::new(
                 self.descriptor.name.clone(),
                 "extension stdout was unavailable",
