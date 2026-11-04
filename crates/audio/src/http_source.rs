@@ -66,9 +66,7 @@ impl HttpSourceManager {
             cache: Arc::new(Mutex::new(CacheState::default())),
             max_cache_bytes,
             max_download_bytes,
-            resolve_slots: Arc::new(tokio::sync::Semaphore::new(
-                DEFAULT_CONCURRENT_RESOLVES,
-            )),
+            resolve_slots: Arc::new(tokio::sync::Semaphore::new(DEFAULT_CONCURRENT_RESOLVES)),
         }
     }
 
