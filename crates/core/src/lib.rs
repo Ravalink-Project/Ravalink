@@ -579,6 +579,22 @@ impl AudioPlayerStore {
         Ok(())
     }
 
+    /// Replace the active track with a bounded PCM stream.
+    pub async fn load_streamed_track(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        track: AudioTrack,
+        receiver: tokio::sync::mpsc::Receiver<PcmFrame>,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        let mut player = player.lock().await;
+        player.load_streamed_track(track, receiver)?;
+        drop(player);
+        self.release_pcm_budget(&(session_id.to_owned(), guild_id.to_owned()));
+        Ok(())
+    }
+
     pub async fn next_encrypted_voice_packet(
         &self,
         session_id: &str,

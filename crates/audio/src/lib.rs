@@ -549,6 +549,7 @@ pub struct NativePlayer {
     end_time_ms: Option<u64>,
     volume: u16,
     decoded_frames: Vec<PcmFrame>,
+    streamed_frames: Option<tokio::sync::mpsc::Receiver<PcmFrame>>,
     next_frame_index: usize,
     processor: DspProcessor,
     voice_packetizer: VoicePcmPacketizer,
@@ -576,6 +577,7 @@ impl NativePlayer {
             end_time_ms: None,
             volume: 100,
             decoded_frames: Vec::new(),
+            streamed_frames: None,
             next_frame_index: 0,
             processor: DspProcessor::new(filters),
             voice_packetizer: VoicePcmPacketizer::new(),
@@ -620,7 +622,20 @@ impl NativePlayer {
         }
         self.start(track)?;
         self.decoded_frames = frames;
+        self.streamed_frames = None;
         self.next_frame_index = 0;
+        Ok(())
+    }
+
+    /// Attach a bounded PCM receiver as the active playback source.
+    /// Empty queues are temporary underruns; a closed queue ends the track.
+    pub fn load_streamed_track(
+        &mut self,
+        track: AudioTrack,
+        receiver: tokio::sync::mpsc::Receiver<PcmFrame>,
+    ) -> Result<(), AudioError> {
+        self.start(track)?;
+        self.streamed_frames = Some(receiver);
         Ok(())
     }
 
@@ -696,6 +711,25 @@ impl NativePlayer {
         if self.track.is_none() || self.paused {
             return Ok(None);
         }
+        if let Some(result) = self.streamed_frames.as_mut().map(|receiver| receiver.try_recv()) {
+            match result {
+                Ok(frame) => {
+                    let processed = self.process_frame(frame)?;
+                    if self.track.is_none() {
+                        self.streamed_frames = None;
+                    }
+                    return Ok(processed);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return Ok(None),
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.streamed_frames = None;
+                    self.completed_track = self.track.take();
+                    self.position_ms = 0;
+                    self.voice_packetizer.clear();
+                    return Ok(None);
+                }
+            }
+        }
         let Some(frame) = self.decoded_frames.get(self.next_frame_index).cloned() else {
             self.completed_track = self.track.take();
             self.position_ms = 0;
@@ -769,6 +803,7 @@ impl AudioPipeline for NativePlayer {
         self.position_ms = 0;
         self.end_time_ms = None;
         self.decoded_frames.clear();
+        self.streamed_frames = None;
         self.next_frame_index = 0;
         self.voice_packetizer.clear();
         if let Some(encoder) = self.opus_encoder.as_mut() {
@@ -795,6 +830,9 @@ impl AudioPipeline for NativePlayer {
         };
         if track.is_stream {
             return Err(AudioError::invalid("live streams are not seekable"));
+        }
+        if self.streamed_frames.is_some() {
+            return Err(AudioError::invalid("cannot seek while a bounded PCM stream is active"));
         }
         if track
             .duration_ms
@@ -834,6 +872,7 @@ impl AudioPipeline for NativePlayer {
         self.position_ms = 0;
         self.end_time_ms = None;
         self.decoded_frames.clear();
+        self.streamed_frames = None;
         self.next_frame_index = 0;
         self.voice_packetizer.clear();
         if let Some(encoder) = self.opus_encoder.as_mut() {
@@ -1246,5 +1285,51 @@ mod tests {
             "finished"
         );
         assert!(player.take_completed_track().is_none());
+    }
+}
+
+
+#[cfg(test)]
+mod streamed_queue_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn native_player_consumes_bounded_stream_and_completes_on_channel_close() {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let mut player = NativePlayer::default();
+        let track = AudioTrack {
+            identifier: "streamed".into(),
+            title: "Streamed track".into(),
+            author: "Test".into(),
+            duration_ms: None,
+            is_stream: false,
+        };
+        player.load_streamed_track(track.clone(), receiver).unwrap();
+        assert!(player.next_frame().unwrap().is_none());
+
+        sender.send(PcmFrame {
+            samples: vec![0.1, -0.1],
+            channels: 2,
+            sample_rate: 48_000,
+        }).await.unwrap();
+        assert!(player.next_frame().unwrap().is_some());
+        drop(sender);
+
+        assert!(player.next_frame().unwrap().is_none());
+        assert_eq!(player.take_completed_track(), Some(track));
+    }
+
+    #[tokio::test]
+    async fn streamed_queue_rejects_seek_until_a_seekable_source_is_reopened() {
+        let (_sender, receiver) = tokio::sync::mpsc::channel(1);
+        let mut player = NativePlayer::default();
+        player.load_streamed_track(AudioTrack {
+            identifier: "streamed".into(),
+            title: "Streamed track".into(),
+            author: "Test".into(),
+            duration_ms: Some(60_000),
+            is_stream: false,
+        }, receiver).unwrap();
+        assert!(player.seek(1_000).is_err());
     }
 }
