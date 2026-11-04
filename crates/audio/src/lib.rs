@@ -405,11 +405,40 @@ pub async fn decode_stream_to_channel(
     max_pcm_bytes: usize,
     sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
 ) -> Result<(), AudioError> {
+    decode_stream_to_channel_at(receiver, extension, max_pcm_bytes, 0, sender).await
+}
+
+/// Decode a progressive source while discarding its decoded prefix up to the requested position.
+pub async fn decode_stream_to_channel_at(
+    receiver: tokio::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
+    extension: Option<String>,
+    max_pcm_bytes: usize,
+    position_ms: u64,
+    sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
+) -> Result<(), AudioError> {
     tokio::task::spawn_blocking(move || {
         let source = Box::new(StreamingMediaSource::new(receiver))
             as Box<dyn symphonia::core::io::MediaSource>;
+        let mut elapsed_samples = 0_u64;
         let decoded =
-            decode_media_source_with(source, extension.as_deref(), max_pcm_bytes, |frame| {
+            decode_media_source_with(source, extension.as_deref(), max_pcm_bytes, |mut frame| {
+                if frame.channels == 0 || frame.sample_rate == 0 {
+                    return Err(AudioError::invalid("streamed PCM frame has an invalid layout"));
+                }
+                let channels = usize::from(frame.channels);
+                let frame_samples = frame.samples.len() / channels;
+                let target_samples =
+                    position_ms.saturating_mul(u64::from(frame.sample_rate)) / 1_000;
+                if elapsed_samples < target_samples {
+                    let samples_to_skip = target_samples
+                        .saturating_sub(elapsed_samples)
+                        .min(frame_samples as u64) as usize;
+                    frame.samples.drain(..samples_to_skip * channels);
+                    elapsed_samples = elapsed_samples.saturating_add(frame_samples as u64);
+                }
+                if frame.samples.is_empty() {
+                    return Ok(());
+                }
                 sender
                     .blocking_send(Ok(frame))
                     .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))

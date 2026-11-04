@@ -138,6 +138,7 @@ impl HttpSourceManager {
         &self,
         identifier: &str,
         max_pcm_bytes: usize,
+        position_ms: u64,
         sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
     ) -> Result<(), AudioError> {
         let permit = self
@@ -199,7 +200,7 @@ impl HttpSourceManager {
             }
         });
 
-        let decoded = crate::decode_stream_to_channel(
+        let decoded = crate::decode_stream_to_channel_at(
             compressed_receiver,
             Some(
                 match probe {
@@ -215,6 +216,7 @@ impl HttpSourceManager {
                 .to_owned(),
             ),
             max_pcm_bytes,
+            position_ms,
             sender,
         )
         .await;

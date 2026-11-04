@@ -819,13 +819,6 @@ async fn update_player(
             .get("position")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(track.info.position);
-        if initial_position_ms > 0 {
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                "progressive HTTP streams cannot start at a non-zero position",
-                &path,
-            );
-        }
         let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
         if let Err(error) = state
             .audio_players
@@ -847,7 +840,12 @@ async fn update_player(
         let http_sources = state.http_sources.clone();
         tokio::spawn(async move {
             if let Err(error) = http_sources
-                .stream_to_channel(&stream_url, 4 * 1024 * 1024, pcm_sender)
+                .stream_to_channel(
+                    &stream_url,
+                    4 * 1024 * 1024,
+                    initial_position_ms,
+                    pcm_sender,
+                )
                 .await
             {
                 tracing::warn!(%error, "progressive HTTP audio stream stopped");
