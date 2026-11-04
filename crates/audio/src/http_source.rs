@@ -12,12 +12,14 @@ use std::{
 
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
+const DEFAULT_CONCURRENT_RESOLVES: usize = 2;
 
 #[derive(Clone)]
 pub struct HttpSourceManager {
     cache: Arc<Mutex<CacheState>>,
     max_cache_bytes: usize,
     max_download_bytes: usize,
+    resolve_slots: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Default)]
@@ -64,6 +66,9 @@ impl HttpSourceManager {
             cache: Arc::new(Mutex::new(CacheState::default())),
             max_cache_bytes,
             max_download_bytes,
+            resolve_slots: Arc::new(tokio::sync::Semaphore::new(
+                DEFAULT_CONCURRENT_RESOLVES,
+            )),
         }
     }
 
@@ -72,6 +77,12 @@ impl HttpSourceManager {
     /// This initial adapter buffers the source before decoding. It is intended
     /// for bounded files, not live radio streams or large remote archives.
     pub async fn resolve(&self, identifier: &str) -> Result<ResolvedHttpTrack, AudioError> {
+        let _resolve_permit = self
+            .resolve_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| AudioError::invalid("HTTP source resolver is shutting down"))?;
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         if !matches!(url.scheme(), "http" | "https") {
@@ -388,6 +399,23 @@ fn media_title(url: &reqwest::Url) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloned_http_source_managers_share_a_bounded_resolution_semaphore() {
+        let manager = HttpSourceManager::new(64);
+        let clone = manager.clone();
+        assert_eq!(manager.resolve_slots.available_permits(), 2);
+
+        let first = manager.resolve_slots.clone().try_acquire_owned().unwrap();
+        let second = clone.resolve_slots.clone().try_acquire_owned().unwrap();
+        assert_eq!(manager.resolve_slots.available_permits(), 0);
+        assert!(manager.resolve_slots.clone().try_acquire_owned().is_err());
+
+        drop(first);
+        assert_eq!(manager.resolve_slots.available_permits(), 1);
+        drop(second);
+        assert_eq!(manager.resolve_slots.available_permits(), 2);
+    }
 
     #[test]
     fn compressed_source_cache_evicts_oldest_entries_to_respect_its_limit() {
