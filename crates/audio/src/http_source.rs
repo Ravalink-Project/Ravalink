@@ -348,9 +348,11 @@ fn is_public_ip(address: IpAddr) -> bool {
                 && !address.is_broadcast()
                 && !address.is_multicast()
                 && !(a == 100 && (64..=127).contains(&b))
-                && !(a == 192 && b == 0)
+                && !(a == 192 && b == 0 && (c == 0 || c == 2))
+                && !(a == 192 && b == 88 && c == 99)
                 && a != 0
-                && !(a == 198 && (b == 18 || b == 19 || b == 51))
+                && !(a == 198 && (b == 18 || b == 19))
+                && !(a == 198 && b == 51 && c == 100)
                 && !(a == 203 && b == 0 && c == 113)
                 && a < 224
         }
@@ -358,12 +360,33 @@ fn is_public_ip(address: IpAddr) -> bool {
             if let Some(mapped) = address.to_ipv4_mapped() {
                 return is_public_ip(IpAddr::V4(mapped));
             }
+            let segments = address.segments();
+            let ipv4_compatible = segments[..6].iter().all(|segment| *segment == 0);
+            let nat64_well_known =
+                segments[0] == 0x0064
+                    && segments[1] == 0xff9b
+                    && segments[2..6].iter().all(|segment| *segment == 0);
+            let nat64_local_use =
+                segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 1;
+            let discard_only =
+                segments[0] == 0x0100
+                    && segments[1..4].iter().all(|segment| *segment == 0);
+            let ietf_protocol = segments[0] == 0x2001 && segments[1] <= 0x01ff;
+            let documentation = (segments[0] == 0x2001 && segments[1] == 0x0db8)
+                || (segments[0] == 0x3fff && segments[1] <= 0x0fff);
             !address.is_loopback()
                 && !address.is_unspecified()
                 && !address.is_multicast()
                 && !address.is_unique_local()
                 && !address.is_unicast_link_local()
-                && !(address.segments()[0] == 0x2001 && address.segments()[1] == 0x0db8)
+                && !ipv4_compatible
+                && !nat64_well_known
+                && !nat64_local_use
+                && !discard_only
+                && !ietf_protocol
+                && !documentation
+                && segments[0] != 0x2002
+                && segments[0] & 0xffc0 != 0xfec0
         }
     }
 }
@@ -478,7 +501,22 @@ mod tests {
             "100.64.0.1",
             "192.168.1.1",
             "169.254.1.1",
+            "192.0.2.1",
+            "192.88.99.1",
+            "198.51.100.10",
+            "203.0.113.1",
+            "240.0.0.1",
             "::1",
+            "::a00:1",
+            "::ffff:10.0.0.1",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::a00:1",
+            "100::1",
+            "2001:1::1",
+            "2001:db8::1",
+            "2002:a00:1::1",
+            "3fff::1",
+            "fec0::1",
             "fc00::1",
             "fe80::1",
         ] {
