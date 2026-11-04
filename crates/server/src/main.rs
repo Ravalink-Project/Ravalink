@@ -56,18 +56,53 @@ impl PlaybackSourceStore {
         }
     }
 
-    async fn insert(&self, key: (String, String), source: CachedHttpSource) -> bool {
+    async fn replace(
+        &self,
+        key: (String, String),
+        source: CachedHttpSource,
+    ) -> Result<Option<CachedHttpSource>, ()> {
         let mut state = self.inner.lock().await;
-        if let Some(previous) = state.entries.remove(&key) {
-            state.bytes_used = state.bytes_used.saturating_sub(previous.bytes.len());
-        }
+        let previous_bytes = state
+            .entries
+            .get(&key)
+            .map_or(0, |previous| previous.bytes.len());
         let bytes = source.bytes.len();
-        if bytes > self.max_bytes || state.bytes_used.saturating_add(bytes) > self.max_bytes {
-            return false;
+        let bytes_without_previous = state.bytes_used.saturating_sub(previous_bytes);
+        if bytes > self.max_bytes
+            || bytes_without_previous.saturating_add(bytes) > self.max_bytes
+        {
+            return Err(());
         }
-        state.bytes_used = state.bytes_used.saturating_add(bytes);
+        let previous = state.entries.remove(&key);
+        state.bytes_used = bytes_without_previous.saturating_add(bytes);
         state.entries.insert(key, source);
-        true
+        Ok(previous)
+    }
+
+    async fn restore(
+        &self,
+        key: (String, String),
+        expected: &CachedHttpSource,
+        previous: Option<CachedHttpSource>,
+    ) {
+        let mut state = self.inner.lock().await;
+        let is_current = state
+            .entries
+            .get(&key)
+            .is_some_and(|current| Arc::ptr_eq(&current.bytes, &expected.bytes));
+        if !is_current {
+            return;
+        }
+        if let Some(current) = state.entries.remove(&key) {
+            state.bytes_used = state.bytes_used.saturating_sub(current.bytes.len());
+        }
+        if let Some(previous) = previous {
+            let bytes = previous.bytes.len();
+            if state.bytes_used.saturating_add(bytes) <= self.max_bytes {
+                state.bytes_used = state.bytes_used.saturating_add(bytes);
+                state.entries.insert(key, previous);
+            }
+        }
     }
 
     async fn get(&self, key: &(String, String)) -> Option<CachedHttpSource> {
@@ -747,6 +782,21 @@ async fn update_player(
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(track.info.position);
         let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
+        let source_key = (session_id.clone(), guild_id.clone());
+        let previous_source = match state
+            .playback_sources
+            .replace(source_key.clone(), source.clone())
+            .await
+        {
+            Ok(previous) => previous,
+            Err(()) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "active playback source cache is full",
+                    &path,
+                );
+            }
+        };
         if let Err(error) = state
             .audio_players
             .load_streamed_track_at(
@@ -758,18 +808,11 @@ async fn update_player(
             )
             .await
         {
+            state
+                .playback_sources
+                .restore(source_key, &source, previous_source)
+                .await;
             return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-        }
-        if !state
-            .playback_sources
-            .insert((session_id.clone(), guild_id.clone()), source.clone())
-            .await
-        {
-            warn!(
-                %guild_id,
-                cache_limit_bytes = state.playback_sources.max_bytes,
-                "playback source cache is full; seeking this track will be unavailable"
-            );
         }
         tokio::spawn(async move {
             let _ = decode_bytes_to_channel_at(
@@ -1799,13 +1842,15 @@ mod server_api_tests {
         let first = ("session".to_owned(), "guild-a".to_owned());
         let second = ("session".to_owned(), "guild-b".to_owned());
 
-        assert!(store.insert(first.clone(), source(8)).await);
+        assert!(store.replace(first.clone(), source(8)).await.unwrap().is_none());
         assert_eq!(store.bytes_used().await, 8);
-        assert!(!store.insert(second.clone(), source(9)).await);
+        assert!(store.replace(second.clone(), source(9)).await.is_err());
         assert_eq!(store.bytes_used().await, 8);
-        assert!(store.insert(first.clone(), source(12)).await);
+        let previous = store.replace(first.clone(), source(12)).await.unwrap();
         assert_eq!(store.bytes_used().await, 12);
-        assert!(!store.insert(second, source(8)).await);
+        store.restore(first.clone(), previous).await;
+        assert_eq!(store.bytes_used().await, 8);
+        assert!(store.replace(second, source(9)).await.is_err());
         store.remove(&first).await;
         assert_eq!(store.bytes_used().await, 0);
     }
