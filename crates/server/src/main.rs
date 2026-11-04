@@ -17,10 +17,10 @@ use ravalink_plugin_lavasearch::LavaSearchPlugin;
 use ravalink_plugin_lavasrc::LavaSrcPlugin;
 use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{
-    ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, PlayerStateUpdate,
-    PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage, Track,
-    TrackEndEvent, TrackEndReason, TrackEvent, TrackEventBase, WebSocketMessage, decode_track,
-    encode_track,
+    ApiError, CpuStats, EncodedTracks, ExceptionSeverity, LoadResult, MemoryStats, NodeStats,
+    PlayerStateUpdate, PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage,
+    Track, TrackEndEvent, TrackEndReason, TrackEvent, TrackEventBase, TrackException,
+    TrackExceptionEvent, WebSocketMessage, decode_track, encode_track,
 };
 use serde::Deserialize;
 use std::{
@@ -1001,7 +1001,29 @@ async fn run_voice_audio_loop(
                         Ok(None) => {}
                         Err(error) => {
                             warn!(%error, %guild_id, "Failed to encode Discord voice packet");
-                            break;
+                            if let Some(encoded) = state
+                                .players
+                                .get(session_id, guild_id)
+                                .await
+                                .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned))
+                            {
+                                publish_track_exception(
+                                    state,
+                                    session_id,
+                                    guild_id,
+                                    encoded,
+                                    &error.message,
+                                    "AudioEncodingError",
+                                );
+                            }
+                            state.audio_players.stop(session_id, guild_id).await;
+                            state
+                                .players
+                                .update(session_id, guild_id, serde_json::json!({
+                                    "track": null,
+                                    "paused": false
+                                }))
+                                .await;
                         }
                     }
 
@@ -1096,6 +1118,35 @@ fn publish_track_end(
             guild_id: guild_id.to_owned(),
             track,
             reason,
+        }))),
+    ));
+}
+
+fn publish_track_exception(
+    state: &AppState,
+    session_id: &str,
+    guild_id: &str,
+    encoded_track: String,
+    message: &str,
+    cause: &str,
+) {
+    let track = match decode_track(&encoded_track) {
+        Ok(track) => track,
+        Err(error) => {
+            warn!(%error, %guild_id, "cannot publish TrackExceptionEvent with an invalid encoded track");
+            return;
+        }
+    };
+    let _ = state.events.send((
+        session_id.to_owned(),
+        WebSocketMessage::Event(Box::new(TrackEvent::TrackException(TrackExceptionEvent {
+            guild_id: guild_id.to_owned(),
+            track,
+            exception: TrackException {
+                message: Some(message.to_owned()),
+                severity: ExceptionSeverity::Fault,
+                cause: cause.to_owned(),
+            },
         }))),
     ));
 }
