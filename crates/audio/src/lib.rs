@@ -249,12 +249,49 @@ pub async fn decode_bytes_to_channel(
     max_pcm_bytes: usize,
     sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
 ) -> Result<(), AudioError> {
+    decode_bytes_to_channel_at(bytes, extension, max_pcm_bytes, 0, sender).await
+}
+
+/// Decode a buffered source into a bounded channel, discarding PCM before the
+/// requested position. This re-decodes from the beginning of the compressed
+/// source, but does not retain the decoded prefix in memory.
+pub async fn decode_bytes_to_channel_at(
+    bytes: Vec<u8>,
+    extension: Option<String>,
+    max_pcm_bytes: usize,
+    position_ms: u64,
+    sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
+) -> Result<(), AudioError> {
     tokio::task::spawn_blocking(move || {
-        let decoded = decode_bytes_with(bytes, extension.as_deref(), max_pcm_bytes, |frame| {
-            sender
-                .blocking_send(Ok(frame))
-                .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))
-        });
+        let mut elapsed_samples = 0_u64;
+        let decoded = decode_bytes_with(
+            bytes,
+            extension.as_deref(),
+            max_pcm_bytes,
+            |mut frame| {
+                if frame.channels == 0 || frame.sample_rate == 0 {
+                    return Err(AudioError::invalid("decoded PCM frame has an invalid layout"));
+                }
+                let channels = usize::from(frame.channels);
+                let frame_samples = frame.samples.len() / channels;
+                let target_samples = position_ms
+                    .saturating_mul(u64::from(frame.sample_rate))
+                    / 1_000;
+                if elapsed_samples < target_samples {
+                    let samples_to_skip = target_samples
+                        .saturating_sub(elapsed_samples)
+                        .min(frame_samples as u64) as usize;
+                    frame.samples.drain(..samples_to_skip * channels);
+                    elapsed_samples = elapsed_samples.saturating_add(frame_samples as u64);
+                }
+                if !frame.samples.is_empty() {
+                    sender
+                        .blocking_send(Ok(frame))
+                        .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))?;
+                }
+                Ok(())
+            },
+        );
         if let Err(error) = decoded {
             let _ = sender.blocking_send(Err(AudioError::invalid(format!(
                 "audio decode failed: {}",
@@ -647,6 +684,57 @@ impl NativePlayer {
         Ok(())
     }
 
+    /// Attach a bounded PCM stream and begin it at a requested position.
+    pub fn load_streamed_track_at(
+        &mut self,
+        track: AudioTrack,
+        position_ms: u64,
+        receiver: tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>,
+    ) -> Result<(), AudioError> {
+        if track.is_stream && position_ms > 0 {
+            return Err(AudioError::invalid("live streams are not seekable"));
+        }
+        if track
+            .duration_ms
+            .is_some_and(|duration| position_ms > duration)
+        {
+            return Err(AudioError::invalid("seek position exceeds track duration"));
+        }
+        self.start(track)?;
+        self.position_ms = position_ms;
+        self.streamed_frames = Some(receiver);
+        Ok(())
+    }
+
+    /// Restart the current buffered source at a new position using a fresh bounded decoder.
+    pub fn restart_streamed_source(
+        &mut self,
+        position_ms: u64,
+        receiver: tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>,
+    ) -> Result<(), AudioError> {
+        let Some(track) = self.track.as_ref() else {
+            return Err(AudioError::invalid("cannot seek a player without an active track"));
+        };
+        if track.is_stream {
+            return Err(AudioError::invalid("live streams are not seekable"));
+        }
+        if track.duration_ms.is_some_and(|duration| position_ms > duration)
+            || self.end_time_ms.is_some_and(|end_time| position_ms > end_time)
+        {
+            return Err(AudioError::invalid("seek position exceeds track duration"));
+        }
+        self.streamed_frames = Some(receiver);
+        self.decoded_frames.clear();
+        self.next_frame_index = 0;
+        self.position_ms = position_ms;
+        self.voice_packetizer.clear();
+        self.processor.reset_state();
+        if let Some(encoder) = self.opus_encoder.as_mut() {
+            encoder.reset()?;
+        }
+        Ok(())
+    }
+
     /// Return the next decoded frame after applying the player's DSP chain.
     /// Build and encrypt the next Discord-compatible legacy voice packet.
     pub fn next_encrypted_voice_packet(
@@ -991,6 +1079,42 @@ mod tests {
         assert!(receiver.recv().await.is_none());
     }
 
+    #[tokio::test]
+    async fn bounded_decoder_starts_at_the_requested_position() {
+        let sample_count = 48_000_u32;
+        let data_bytes = sample_count * 2;
+        let mut wav = Vec::with_capacity(44 + data_bytes as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_bytes).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&96_000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_bytes.to_le_bytes());
+        for sample in 0..sample_count {
+            wav.extend_from_slice(&((sample % 30_000) as i16).to_le_bytes());
+        }
+
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(128);
+        let decode = tokio::spawn(decode_bytes_to_channel_at(
+            wav,
+            Some("wav".to_owned()),
+            200_000,
+            500,
+            sender,
+        ));
+        let first = receiver.recv().await.unwrap().unwrap();
+        decode.await.unwrap().unwrap();
+        assert_eq!(first.channels, 1);
+        assert_eq!(first.sample_rate, 48_000);
+        assert!((first.samples[0] - (24_000.0 / 32_768.0)).abs() < 0.0001);
+    }
+
     #[test]
     fn decoder_emits_pcm_frames_through_the_streaming_callback() {
         let mut wav = Vec::new();
@@ -1043,6 +1167,58 @@ mod tests {
         assert!(!frames.is_empty());
         assert_eq!(frames[0].channels, 2);
         assert_eq!(frames[0].sample_rate, 48_000);
+    }
+
+    #[test]
+    fn streamed_source_restart_preserves_pause_and_player_controls() {
+        let mut player = NativePlayer::default();
+        let track = AudioTrack {
+            identifier: "buffered".into(),
+            title: "Buffered".into(),
+            author: "Test".into(),
+            duration_ms: Some(20_000),
+            is_stream: false,
+        };
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        player.load_streamed_track_at(track, 5_000, receiver).unwrap();
+        player.set_volume(250).unwrap();
+        player.pause(true).unwrap();
+
+        let (next_sender, next_receiver) = tokio::sync::mpsc::channel(1);
+        player.restart_streamed_source(8_000, next_receiver).unwrap();
+        let snapshot = player.snapshot();
+        assert_eq!(snapshot.position_ms, 8_000);
+        assert!(snapshot.paused);
+        assert_eq!(snapshot.volume, 250);
+        drop((sender, next_sender));
+    }
+
+    #[test]
+    fn invalid_initial_stream_position_does_not_replace_the_current_track() {
+        let mut player = NativePlayer::default();
+        let current = AudioTrack {
+            identifier: "current".into(),
+            title: "Current".into(),
+            author: "Test".into(),
+            duration_ms: Some(10_000),
+            is_stream: false,
+        };
+        player.start(current.clone()).unwrap();
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let requested = AudioTrack {
+            identifier: "requested".into(),
+            title: "Requested".into(),
+            author: "Test".into(),
+            duration_ms: Some(100),
+            is_stream: false,
+        };
+        assert!(
+            player
+                .load_streamed_track_at(requested, 101, receiver)
+                .is_err()
+        );
+        assert_eq!(player.snapshot().track, Some(current));
+        drop(sender);
     }
 
     #[test]

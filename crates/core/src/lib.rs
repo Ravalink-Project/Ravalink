@@ -595,6 +595,36 @@ impl AudioPlayerStore {
         Ok(())
     }
 
+    /// Attach a bounded source stream starting at the requested position.
+    pub async fn load_streamed_track_at(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        track: AudioTrack,
+        position_ms: u64,
+        receiver: tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        let mut player = player.lock().await;
+        player.load_streamed_track_at(track, position_ms, receiver)?;
+        drop(player);
+        self.release_pcm_budget(&(session_id.to_owned(), guild_id.to_owned()));
+        Ok(())
+    }
+
+    /// Restart a buffered source at a new position without resetting player controls.
+    pub async fn restart_streamed_source(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        position_ms: u64,
+        receiver: tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>,
+    ) -> Result<(), AudioError> {
+        let player = self.get_or_create(session_id, guild_id).await;
+        let mut player = player.lock().await;
+        player.restart_streamed_source(position_ms, receiver)
+    }
+
     pub async fn next_encrypted_voice_packet(
         &self,
         session_id: &str,

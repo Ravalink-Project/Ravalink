@@ -12,7 +12,7 @@ use axum::{
 };
 use ravalink_audio::{
     AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager,
-    decode_bytes_limited, decode_bytes_to_channel,
+    decode_bytes_to_channel_at,
 };
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_plugin_api::PluginRegistry;
@@ -36,6 +36,63 @@ use tokio::{net::TcpListener, sync::watch};
 use tracing::{info, warn};
 
 type VoiceTaskMap = Arc<tokio::sync::Mutex<HashMap<(String, String), watch::Sender<bool>>>>;
+#[derive(Clone)]
+struct PlaybackSourceStore {
+    inner: Arc<tokio::sync::Mutex<PlaybackSourceState>>,
+    max_bytes: usize,
+}
+
+#[derive(Default)]
+struct PlaybackSourceState {
+    entries: HashMap<(String, String), CachedHttpSource>,
+    bytes_used: usize,
+}
+
+impl PlaybackSourceStore {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            inner: Arc::new(tokio::sync::Mutex::new(PlaybackSourceState::default())),
+            max_bytes,
+        }
+    }
+
+    async fn insert(&self, key: (String, String), source: CachedHttpSource) -> bool {
+        let mut state = self.inner.lock().await;
+        if let Some(previous) = state.entries.remove(&key) {
+            state.bytes_used = state.bytes_used.saturating_sub(previous.bytes.len());
+        }
+        let bytes = source.bytes.len();
+        if bytes > self.max_bytes || state.bytes_used.saturating_add(bytes) > self.max_bytes {
+            return false;
+        }
+        state.bytes_used = state.bytes_used.saturating_add(bytes);
+        state.entries.insert(key, source);
+        true
+    }
+
+    async fn get(&self, key: &(String, String)) -> Option<CachedHttpSource> {
+        self.inner.lock().await.entries.get(key).cloned()
+    }
+
+    async fn remove(&self, key: &(String, String)) {
+        let mut state = self.inner.lock().await;
+        if let Some(source) = state.entries.remove(key) {
+            state.bytes_used = state.bytes_used.saturating_sub(source.bytes.len());
+        }
+    }
+
+    async fn remove_session(&self, session_id: &str) {
+        let mut state = self.inner.lock().await;
+        state.entries.retain(|(session, _), _| session != session_id);
+        state.bytes_used = state.entries.values().fold(0_usize, |total, source| {
+            total.saturating_add(source.bytes.len())
+        });
+    }
+
+    async fn bytes_used(&self) -> usize {
+        self.inner.lock().await.bytes_used
+    }
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -45,6 +102,7 @@ struct AppState {
     audio_players: AudioPlayerStore,
     voice_tasks: VoiceTaskMap,
     http_sources: HttpSourceManager,
+    playback_sources: PlaybackSourceStore,
     plugins: PluginRegistry,
     metrics_enabled: bool,
     player_update_interval: u64,
@@ -148,6 +206,7 @@ async fn main() {
             config.audio.max_source_download_bytes,
             config.audio.max_decoded_cache_bytes,
         ),
+        playback_sources: PlaybackSourceStore::new(config.audio.max_decoded_cache_bytes),
         plugins: built_in_plugins(),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
@@ -160,6 +219,7 @@ async fn main() {
     let cleanup_sessions = state.sessions.clone();
     let cleanup_players = state.players.clone();
     let cleanup_audio_players = state.audio_players.clone();
+    let cleanup_playback_sources = state.playback_sources.clone();
     let cleanup_voice_tasks = state.voice_tasks.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
@@ -169,6 +229,7 @@ async fn main() {
                 cleanup_session_resources(
                     &cleanup_players,
                     &cleanup_audio_players,
+                    &cleanup_playback_sources,
                     &cleanup_voice_tasks,
                     &session_id,
                 )
@@ -225,12 +286,14 @@ async fn metrics_endpoint(State(state): State<AppState>) -> Response {
     let players = state.players.len().await;
     let playing_players = state.audio_players.playing_len().await;
     let cache_bytes = state.http_sources.cached_bytes().unwrap_or_default();
+    let playback_source_bytes = state.playback_sources.bytes_used().await;
+    let playback_source_limit = state.playback_sources.max_bytes;
     let active_pcm_bytes = state.audio_players.active_pcm_bytes();
     let active_pcm_limit = state.audio_players.max_active_pcm_bytes();
     let uptime_seconds = state.started_at.elapsed().as_secs_f64();
 
     let body = format!(
-        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_source_cache_bytes Compressed media bytes currently held by the HTTP source cache.\n# TYPE ravalink_source_cache_bytes gauge\nravalink_source_cache_bytes {cache_bytes}\n# HELP ravalink_active_decoded_pcm_bytes Decoded PCM bytes held by active native players.\n# TYPE ravalink_active_decoded_pcm_bytes gauge\nravalink_active_decoded_pcm_bytes {active_pcm_bytes}\n# HELP ravalink_active_decoded_pcm_limit_bytes Configured aggregate active-player PCM limit.\n# TYPE ravalink_active_decoded_pcm_limit_bytes gauge\nravalink_active_decoded_pcm_limit_bytes {active_pcm_limit}\n"
+        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_source_cache_bytes Compressed media bytes currently held by the HTTP source cache.\n# TYPE ravalink_source_cache_bytes gauge\nravalink_source_cache_bytes {cache_bytes}\n# HELP ravalink_playback_seek_cache_bytes Compressed source bytes retained for active player seeking.\n# TYPE ravalink_playback_seek_cache_bytes gauge\nravalink_playback_seek_cache_bytes {playback_source_bytes}\n# HELP ravalink_playback_seek_cache_limit_bytes Configured aggregate compressed source seek-cache limit.\n# TYPE ravalink_playback_seek_cache_limit_bytes gauge\nravalink_playback_seek_cache_limit_bytes {playback_source_limit}\n# HELP ravalink_active_decoded_pcm_bytes Decoded PCM bytes held by active native players.\n# TYPE ravalink_active_decoded_pcm_bytes gauge\nravalink_active_decoded_pcm_bytes {active_pcm_bytes}\n# HELP ravalink_active_decoded_pcm_limit_bytes Configured aggregate active-player PCM limit.\n# TYPE ravalink_active_decoded_pcm_limit_bytes gauge\nravalink_active_decoded_pcm_limit_bytes {active_pcm_limit}\n"
     );
 
     (
@@ -520,6 +583,7 @@ async fn delete_player(
         );
     }
     shutdown_voice_task(&state, &session_id, &_guild_id).await;
+    state.playback_sources.remove(&(session_id.clone(), _guild_id.clone())).await;
     state.audio_players.remove(&session_id, &_guild_id).await;
     state.players.remove(&session_id, &_guild_id).await;
     StatusCode::NO_CONTENT.into_response()
@@ -673,63 +737,45 @@ async fn update_player(
             duration_ms: u64::try_from(track.info.length).ok(),
             is_stream: track.info.is_stream,
         };
-        if track.info.position > 0 {
-            let decode_source = source;
-            let frames = match tokio::task::spawn_blocking(move || {
-                decode_bytes_limited(
-                    decode_source.bytes,
-                    decode_source.extension.as_deref(),
-                    decode_source.max_pcm_bytes,
-                )
-            })
+        let initial_position_ms = fields
+            .get("position")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(track.info.position);
+        let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
+        if let Err(error) = state
+            .audio_players
+            .load_streamed_track_at(
+                &session_id,
+                &guild_id,
+                audio_track,
+                initial_position_ms,
+                pcm_receiver,
+            )
             .await
-            {
-                Ok(Ok(frames)) => frames,
-                Ok(Err(error)) => {
-                    return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-                }
-                Err(error) => {
-                    return api_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        &format!("audio decoder task failed: {error}"),
-                        &path,
-                    );
-                }
-            };
-            if let Err(error) = state
-                .audio_players
-                .load_decoded_track(&session_id, &guild_id, audio_track, frames)
-                .await
-            {
-                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-            }
-        } else {
-            let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
-            if let Err(error) = state
-                .audio_players
-                .load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver)
-                .await
-            {
-                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-            }
-            tokio::spawn(async move {
-                let _ = decode_bytes_to_channel(
-                    source.bytes,
-                    source.extension,
-                    source.max_pcm_bytes,
-                    pcm_sender,
-                )
-                .await;
-            });
-        }
-        if track.info.position > 0
-            && let Err(error) = state
-                .audio_players
-                .seek(&session_id, &guild_id, track.info.position)
-                .await
         {
             return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
         }
+        if !state
+            .playback_sources
+            .insert((session_id.clone(), guild_id.clone()), source.clone())
+            .await
+        {
+            warn!(
+                %guild_id,
+                cache_limit_bytes = state.playback_sources.max_bytes,
+                "playback source cache is full; seeking this track will be unavailable"
+            );
+        }
+        tokio::spawn(async move {
+            let _ = decode_bytes_to_channel_at(
+                source.bytes,
+                source.extension,
+                source.max_pcm_bytes,
+                initial_position_ms,
+                pcm_sender,
+            )
+            .await;
+        });
         if let Some(previous) = previous_encoded_track.as_ref() {
             publish_track_end(
                 &state,
@@ -762,6 +808,7 @@ async fn update_player(
             );
         }
         state.audio_players.stop(&session_id, &guild_id).await;
+        state.playback_sources.remove(&(session_id.clone(), guild_id.clone())).await;
         let object = normalized_update
             .as_object_mut()
             .expect("validated JSON object");
@@ -821,18 +868,19 @@ async fn update_player(
     {
         return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
     }
-    if let Some(position) = fields.get("position").and_then(serde_json::Value::as_u64)
+    if let Some(position) = fields
+        .get("position")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|_| !has_track_request)
         && state
             .audio_players
             .snapshot(&session_id, &guild_id)
             .await
             .is_some_and(|snapshot| snapshot.track.is_some())
-        && let Err(error) = state
-            .audio_players
-            .seek(&session_id, &guild_id, position)
-            .await
     {
-        return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+        if let Err(error) = seek_player_source(&state, &session_id, &guild_id, position).await {
+            return api_error(StatusCode::BAD_REQUEST, &error, &path);
+        }
     }
 
     if let Some(voice_update) = voice_update {
@@ -1095,6 +1143,10 @@ async fn run_voice_audio_loop(
                                 );
                             }
                             state.audio_players.stop(session_id, guild_id).await;
+                            state.playback_sources.remove(&(
+                                session_id.to_owned(),
+                                guild_id.to_owned(),
+                            )).await;
                             state
                                 .players
                                 .update(session_id, guild_id, serde_json::json!({
@@ -1111,6 +1163,10 @@ async fn run_voice_audio_loop(
                         .await
                         .is_some()
                     {
+                        state.playback_sources.remove(&(
+                            session_id.to_owned(),
+                            guild_id.to_owned(),
+                        )).await;
                         if let Some(encoded) = state
                             .players
                             .get(session_id, guild_id)
@@ -1258,6 +1314,54 @@ async fn wait_for_voice_retry(shutdown: &mut watch::Receiver<bool>, delay: Durat
         _ = tokio::time::sleep(delay) => *shutdown.borrow(),
         changed = shutdown.changed() => changed.is_err() || *shutdown.borrow(),
     }
+}
+
+async fn seek_player_source(
+    state: &AppState,
+    session_id: &str,
+    guild_id: &str,
+    position_ms: u64,
+) -> Result<(), String> {
+    let snapshot = state
+        .audio_players
+        .snapshot(session_id, guild_id)
+        .await
+        .ok_or_else(|| "player does not exist".to_owned())?;
+    let track = snapshot
+        .track
+        .ok_or_else(|| "cannot seek a player without an active track".to_owned())?;
+    if track.is_stream {
+        return Err("live streams are not seekable".to_owned());
+    }
+    if track.duration_ms.is_some_and(|duration| position_ms > duration) {
+        return Err("seek position exceeds track duration".to_owned());
+    }
+    let key = (session_id.to_owned(), guild_id.to_owned());
+    let source = state.playback_sources.get(&key).await;
+    let Some(source) = source else {
+        return state
+            .audio_players
+            .seek(session_id, guild_id, position_ms)
+            .await
+            .map_err(|error| error.message);
+    };
+    let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    state
+        .audio_players
+        .restart_streamed_source(session_id, guild_id, position_ms, receiver)
+        .await
+        .map_err(|error| error.message)?;
+    tokio::spawn(async move {
+        let _ = decode_bytes_to_channel_at(
+            source.bytes,
+            source.extension,
+            source.max_pcm_bytes,
+            position_ms,
+            sender,
+        )
+        .await;
+    });
+    Ok(())
 }
 
 async fn resolve_player_track(
@@ -1604,11 +1708,13 @@ async fn handle_socket(
 async fn cleanup_session_resources(
     players: &PlayerStore,
     audio_players: &AudioPlayerStore,
+    playback_sources: &PlaybackSourceStore,
     voice_tasks: &VoiceTaskMap,
     session_id: &str,
 ) {
     players.remove_session(session_id).await;
     audio_players.remove_session(session_id).await;
+    playback_sources.remove_session(session_id).await;
     let mut tasks = voice_tasks.lock().await;
     let keys = tasks
         .keys()
@@ -1653,6 +1759,7 @@ mod server_api_tests {
             audio_players: AudioPlayerStore::default(),
             voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_sources: HttpSourceManager::default(),
+            playback_sources: PlaybackSourceStore::new(256 * 1024 * 1024),
             plugins: built_in_plugins(),
             metrics_enabled: false,
             player_update_interval: 5,
@@ -1667,6 +1774,28 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[tokio::test]
+    async fn playback_source_store_enforces_aggregate_memory_limit() {
+        let store = PlaybackSourceStore::new(16);
+        let source = |size: usize| CachedHttpSource {
+            bytes: vec![0; size],
+            extension: Some("wav".into()),
+            max_pcm_bytes: 64,
+        };
+        let first = ("session".to_owned(), "guild-a".to_owned());
+        let second = ("session".to_owned(), "guild-b".to_owned());
+
+        assert!(store.insert(first.clone(), source(8)).await);
+        assert_eq!(store.bytes_used().await, 8);
+        assert!(!store.insert(second.clone(), source(9)).await);
+        assert_eq!(store.bytes_used().await, 8);
+        assert!(store.insert(first.clone(), source(12)).await);
+        assert_eq!(store.bytes_used().await, 12);
+        assert!(!store.insert(second, source(8)).await);
+        store.remove(&first).await;
+        assert_eq!(store.bytes_used().await, 0);
     }
 
     #[test]

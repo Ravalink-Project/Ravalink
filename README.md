@@ -50,7 +50,7 @@ Configuration is loaded from `config/ravalink.toml` by default, or from
 - `RAVALINK_AUDIO_OPUS_ENCODING_QUALITY`
 - `RAVALINK_AUDIO_RESAMPLING_QUALITY`
 - `RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES` (default: 134217728)
-- `RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES` (default: 268435456; pending load cache)
+- `RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES` (default: 268435456; compressed source cache and aggregate active seek-source cache)
 - `RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES` (default: 268435456; active native players)
 - `RAVALINK_METRICS_PROMETHEUS_ENABLED`
 - `RAVALINK_METRICS_PROMETHEUS_ENDPOINT`

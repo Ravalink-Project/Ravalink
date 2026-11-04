@@ -40,11 +40,13 @@ plugin-resolved tracks are cached as compressed source bytes. Resolution perform
 a validation/duration decode pass that discards PCM packets instead of retaining the
 whole decoded track. Playback then decodes those bytes on a blocking worker into the
 bounded eight-frame channel, applying backpressure as NativePlayer consumes packets.
-A non-zero initial position uses the bounded full-decode fallback so seeking remains
-available for that initial load. The HTTP response itself is still downloaded fully
+Initial and subsequent positions use a bounded decoder that discards the compressed source's decoded prefix without retaining it. The HTTP response itself is still downloaded fully
 before decoding; this is incremental PCM production from a buffered source, not live
-network streaming. Subsequent seek requests while a streamed source is active remain
-limited by the NativePlayer stream contract.
+network streaming. Subsequent seek requests for buffered direct HTTP and built-in
+plugin sources restart the bounded decoder at the requested position while their
+compressed source remains within the aggregate playback seek-cache budget. Seeking
+re-decodes from the beginning of the compressed file; it is not a byte-range or live
+network seek.
 
 The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are

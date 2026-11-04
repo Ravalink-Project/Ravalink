@@ -35,7 +35,7 @@ struct CacheEntry {
     sequence: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedHttpSource {
     pub bytes: Vec<u8>,
     pub extension: Option<String>,
