@@ -320,8 +320,7 @@ fn select_audio_format(formats: &[Value]) -> Option<&Value> {
                 .get("type")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let prefer_streamable_opus =
-                mime.starts_with("audio/webm") || mime.contains("opus");
+            let prefer_streamable_opus = mime.starts_with("audio/webm") || mime.contains("opus");
             let bitrate = format
                 .get("bitrate")
                 .and_then(Value::as_u64)

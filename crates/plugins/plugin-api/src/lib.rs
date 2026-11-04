@@ -438,19 +438,21 @@ impl PluginRegistry {
             if !program.is_file() {
                 return Err(PluginError::new(name, "plugin executable is not a file"));
             }
-            self.register(ProcessPlugin::new(
-                PluginDescriptor {
-                    name: name.to_owned(),
-                    version: manifest.version,
-                    description: manifest.description,
-                    capabilities: manifest.capabilities,
-                },
-                prefix,
-                program,
-                manifest.args,
-                manifest.environment,
-            )
-            .with_config(manifest.config));
+            self.register(
+                ProcessPlugin::new(
+                    PluginDescriptor {
+                        name: name.to_owned(),
+                        version: manifest.version,
+                        description: manifest.description,
+                        capabilities: manifest.capabilities,
+                    },
+                    prefix,
+                    program,
+                    manifest.args,
+                    manifest.environment,
+                )
+                .with_config(manifest.config),
+            );
             loaded += 1;
         }
         Ok(loaded)

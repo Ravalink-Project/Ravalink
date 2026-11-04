@@ -213,19 +213,21 @@ fn built_in_plugins(
     plugins.register(LavaSrcPlugin::default());
     plugins.register(LavaSearchPlugin::default());
     for plugin in external {
-        plugins.register(ProcessPlugin::new(
-            PluginDescriptor {
-                name: plugin.name.clone(),
-                version: plugin.version.clone(),
-                description: plugin.description.clone(),
-                capabilities: plugin.capabilities.clone(),
-            },
-            plugin.identifier_prefix.clone(),
-            plugin.program.clone(),
-            plugin.args.clone(),
-            plugin.environment.clone(),
-        )
-        .with_config(plugin.config.clone()));
+        plugins.register(
+            ProcessPlugin::new(
+                PluginDescriptor {
+                    name: plugin.name.clone(),
+                    version: plugin.version.clone(),
+                    description: plugin.description.clone(),
+                    capabilities: plugin.capabilities.clone(),
+                },
+                plugin.identifier_prefix.clone(),
+                plugin.program.clone(),
+                plugin.args.clone(),
+                plugin.environment.clone(),
+            )
+            .with_config(plugin.config.clone()),
+        );
     }
     let loaded = plugins
         .load_directory(plugin_directory)
