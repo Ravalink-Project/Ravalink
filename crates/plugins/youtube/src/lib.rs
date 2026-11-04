@@ -510,7 +510,7 @@ mod tests {
         let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
 
         let response = plugin.request_json("/api/v1/health").await.unwrap();
-        assert_eq!(response["ok"], true);
+        assert!(response["ok"].as_bool().unwrap());
     }
 
     #[test]
