@@ -1914,9 +1914,14 @@ mod server_api_tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        let error: ApiError = serde_json::from_slice(&body).unwrap();
-        assert!(error.message.contains("At most 1000 tracks"));
-        assert_eq!(error.path, "/v4/decodetracks");
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("At most 1000 tracks")
+        );
+        assert_eq!(error["path"], "/v4/decodetracks");
     }
 
     #[tokio::test]
