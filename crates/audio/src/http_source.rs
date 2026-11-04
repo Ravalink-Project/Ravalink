@@ -13,6 +13,7 @@ use std::{
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_CONCURRENT_RESOLVES: usize = 2;
+const DEFAULT_CONCURRENT_STREAMS: usize = 128;
 const MAX_PCM_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -21,6 +22,7 @@ pub struct HttpSourceManager {
     max_cache_bytes: usize,
     max_download_bytes: usize,
     resolve_slots: Arc<tokio::sync::Semaphore>,
+    stream_slots: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Default)]
@@ -68,6 +70,7 @@ impl HttpSourceManager {
             max_cache_bytes,
             max_download_bytes,
             resolve_slots: Arc::new(tokio::sync::Semaphore::new(DEFAULT_CONCURRENT_RESOLVES)),
+            stream_slots: Arc::new(tokio::sync::Semaphore::new(DEFAULT_CONCURRENT_STREAMS)),
         }
     }
 
@@ -142,11 +145,11 @@ impl HttpSourceManager {
         sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
     ) -> Result<(), AudioError> {
         let permit = self
-            .resolve_slots
+            .stream_slots
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| AudioError::invalid("HTTP source resolver is shutting down"))?;
+            .map_err(|_| AudioError::invalid("HTTP stream manager is shutting down"))?;
         let url = reqwest::Url::parse(identifier)
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         self.validate_url(&url).await?;
@@ -688,6 +691,7 @@ mod tests {
         let manager = HttpSourceManager::new(64);
         let clone = manager.clone();
         assert_eq!(manager.resolve_slots.available_permits(), 2);
+        assert_eq!(manager.stream_slots.available_permits(), DEFAULT_CONCURRENT_STREAMS);
 
         let first = manager.resolve_slots.clone().try_acquire_owned().unwrap();
         let second = clone.resolve_slots.clone().try_acquire_owned().unwrap();
