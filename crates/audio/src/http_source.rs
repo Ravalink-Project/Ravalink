@@ -364,15 +364,13 @@ fn is_public_ip(address: IpAddr) -> bool {
             let ipv4_compatible = segments[..6].iter().all(|segment| *segment == 0);
             let ipv4_translated = segments[..4].iter().all(|segment| *segment == 0)
                 && segments[4] == 0xffff;
-            let nat64_well_known =
-                segments[0] == 0x0064
-                    && segments[1] == 0xff9b
-                    && segments[2..6].iter().all(|segment| *segment == 0);
+            let nat64_well_known = segments[0] == 0x0064
+                && segments[1] == 0xff9b
+                && segments[2..6].iter().all(|segment| *segment == 0);
             let nat64_local_use =
                 segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 1;
             let discard_only =
-                segments[0] == 0x0100
-                    && segments[1..4].iter().all(|segment| *segment == 0);
+                segments[0] == 0x0100 && segments[1..4].iter().all(|segment| *segment == 0);
             let ietf_protocol = segments[0] == 0x2001 && segments[1] <= 0x01ff;
             let documentation = (segments[0] == 0x2001 && segments[1] == 0x0db8)
                 || (segments[0] == 0x3fff && segments[1] <= 0x0fff);
