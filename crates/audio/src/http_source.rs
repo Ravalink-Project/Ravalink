@@ -161,7 +161,8 @@ impl HttpSourceManager {
         if body.len() > self.max_cache_bytes {
             return Err(AudioError::invalid(format!(
                 "compressed HTTP source requires {} cache bytes, exceeding the configured {} byte limit",
-                body.len(), self.max_cache_bytes
+                body.len(),
+                self.max_cache_bytes
             )));
         }
         // Validate and measure off the async executor, discarding each PCM packet.
@@ -194,9 +195,8 @@ impl HttpSourceManager {
                             channels = Some(frame.channels);
                         }
                     }
-                    frame_count = frame_count.saturating_add(
-                        (frame.samples.len() / usize::from(frame.channels)) as u64,
-                    );
+                    frame_count = frame_count
+                        .saturating_add((frame.samples.len() / usize::from(frame.channels)) as u64);
                     Ok(())
                 },
             )?;
@@ -229,13 +229,20 @@ impl HttpSourceManager {
         };
         track.encoded = encode_track_with_source_data(&track, Some(probe))
             .map_err(|error| AudioError::invalid(error.message))?;
-        self.insert_cache(track.encoded.clone(), source_bytes, extension, max_pcm_bytes)?;
+        self.insert_cache(
+            track.encoded.clone(),
+            source_bytes,
+            extension,
+            max_pcm_bytes,
+        )?;
         Ok(ResolvedHttpTrack { track, duration_ms })
     }
 
     /// Take ownership of the compressed source bytes for playback.
     pub fn take_source(&self, encoded_track: &str) -> Result<Option<CachedHttpSource>, AudioError> {
-        let mut cache = self.cache.lock()
+        let mut cache = self
+            .cache
+            .lock()
             .map_err(|_| AudioError::invalid("HTTP source cache lock is poisoned"))?;
         let Some(entry) = cache.entries.remove(encoded_track) else {
             return Ok(None);
@@ -250,7 +257,9 @@ impl HttpSourceManager {
 
     /// Compatibility helper for callers that explicitly need a seekable decoded buffer.
     pub fn take_frames(&self, encoded_track: &str) -> Result<Option<Vec<PcmFrame>>, AudioError> {
-        let Some(source) = self.take_source(encoded_track)? else { return Ok(None) };
+        let Some(source) = self.take_source(encoded_track)? else {
+            return Ok(None);
+        };
         Ok(Some(decode_bytes_limited(
             source.bytes,
             source.extension.as_deref(),
@@ -280,13 +289,17 @@ impl HttpSourceManager {
                 self.max_cache_bytes
             )));
         }
-        let mut cache = self.cache.lock()
+        let mut cache = self
+            .cache
+            .lock()
             .map_err(|_| AudioError::invalid("HTTP source cache lock is poisoned"))?;
         if let Some(previous) = cache.entries.remove(&key) {
             cache.bytes_used = cache.bytes_used.saturating_sub(previous.bytes);
         }
         while cache.bytes_used.saturating_add(bytes) > self.max_cache_bytes {
-            let oldest = cache.entries.iter()
+            let oldest = cache
+                .entries
+                .iter()
                 .min_by_key(|(_, entry)| entry.sequence)
                 .map(|(key, _)| key.clone());
             let Some(oldest) = oldest else { break };
@@ -298,7 +311,13 @@ impl HttpSourceManager {
         let sequence = cache.sequence;
         cache.entries.insert(
             key,
-            CacheEntry { source, extension, max_pcm_bytes, bytes, sequence },
+            CacheEntry {
+                source,
+                extension,
+                max_pcm_bytes,
+                bytes,
+                sequence,
+            },
         );
         cache.bytes_used = cache.bytes_used.saturating_add(bytes);
         Ok(())
@@ -382,7 +401,10 @@ mod tests {
 
         assert_eq!(manager.cached_bytes().unwrap(), 12);
         assert!(manager.take_source("first").unwrap().is_none());
-        assert_eq!(manager.take_source("second").unwrap().unwrap().bytes.len(), 12);
+        assert_eq!(
+            manager.take_source("second").unwrap().unwrap().bytes.len(),
+            12
+        );
         assert_eq!(manager.cached_bytes().unwrap(), 0);
     }
 
@@ -396,7 +418,11 @@ mod tests {
             .insert_cache("oversized".into(), vec![2; 17], Some("mp3".into()), 64)
             .unwrap_err();
 
-        assert!(error.message.contains("exceeding the configured 16 byte limit"));
+        assert!(
+            error
+                .message
+                .contains("exceeding the configured 16 byte limit")
+        );
         assert_eq!(manager.cached_bytes().unwrap(), 8);
         assert!(manager.take_source("oversized").unwrap().is_none());
         assert!(manager.take_source("kept").unwrap().is_some());

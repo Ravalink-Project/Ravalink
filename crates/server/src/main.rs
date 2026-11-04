@@ -1273,7 +1273,9 @@ async fn resolve_player_track(
             .resolve(identifier)
             .await
             .map_err(|error| error.message)?;
-        let source = state.http_sources.take_source(&resolved.track.encoded)
+        let source = state
+            .http_sources
+            .take_source(&resolved.track.encoded)
             .map_err(|error| error.message)?
             .ok_or_else(|| "compressed HTTP audio is no longer cached".to_owned())?;
         return Ok((resolved.track, source));
@@ -1294,7 +1296,9 @@ async fn resolve_player_track(
         track.user_data = user_data.clone();
     }
 
-    let source = state.http_sources.take_source(&track.encoded)
+    let source = state
+        .http_sources
+        .take_source(&track.encoded)
         .map_err(|error| error.message)?;
     if let Some(source) = source {
         return Ok((track, source));
@@ -1330,7 +1334,9 @@ async fn resolve_player_track(
         .resolve(&uri)
         .await
         .map_err(|error| error.message)?;
-    let source = state.http_sources.take_source(&resolved.track.encoded)
+    let source = state
+        .http_sources
+        .take_source(&resolved.track.encoded)
         .map_err(|error| error.message)?
         .ok_or_else(|| "compressed HTTP audio is no longer cached".to_owned())?;
     track = resolved.track;
@@ -1362,7 +1368,9 @@ async fn resolve_plugin_audio_track(
         .resolve(stream_url)
         .await
         .map_err(|error| error.message)?;
-    let source = state.http_sources.take_source(&resolved.track.encoded)
+    let source = state
+        .http_sources
+        .take_source(&resolved.track.encoded)
         .map_err(|error| error.message)?
         .ok_or_else(|| "compressed plugin audio is no longer cached".to_owned())?;
     Ok((track, source))
