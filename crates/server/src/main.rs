@@ -1850,9 +1850,15 @@ mod server_api_tests {
         assert_eq!(store.bytes_used().await, 8);
         assert!(store.replace(second.clone(), source(9)).await.is_err());
         assert_eq!(store.bytes_used().await, 8);
-        let previous = store.replace(first.clone(), source(12)).await.unwrap();
+        let replacement = source(12);
+        let previous = store
+            .replace(first.clone(), replacement.clone())
+            .await
+            .unwrap();
         assert_eq!(store.bytes_used().await, 12);
-        store.restore(first.clone(), previous).await;
+        store
+            .restore(first.clone(), &replacement, previous)
+            .await;
         assert_eq!(store.bytes_used().await, 8);
         assert!(store.replace(second, source(9)).await.is_err());
         store.remove(&first).await;
@@ -1906,7 +1912,7 @@ mod server_api_tests {
         assert!(
             state
                 .playback_sources
-                .insert(
+                .replace(
                     ("session".into(), "guild".into()),
                     CachedHttpSource {
                         bytes: Arc::from(vec![1, 2, 3]),
@@ -1915,6 +1921,8 @@ mod server_api_tests {
                     },
                 )
                 .await
+                .unwrap()
+                .is_none()
         );
         state
             .audio_players
