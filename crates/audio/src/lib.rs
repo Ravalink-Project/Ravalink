@@ -18,7 +18,7 @@ pub use voice_gateway_client::DiscordVoiceConnection;
 pub mod voice_pcm;
 pub mod voice_udp;
 pub use dave::{DaveGatewayCommand, DaveVoiceController, DaveVoiceError, DaveVoiceSession};
-pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
+pub use http_source::{CachedHttpSource, HttpSourceManager, ResolvedHttpTrack};
 pub use opus::OpusFrameEncoder;
 pub use rtp::RtpPacketizer;
 pub use voice_crypto::{VoiceEncryptionMode, VoicePacketEncryptor, VoicePacketPipeline};

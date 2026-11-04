@@ -19,11 +19,11 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
 | Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP and enabled native-plugin track resolution load decoded PCM into NativePlayer; volume, filters, pause, seek, stop, replacement and end-time controls update native state; Discord voice output is connected to the native gateway driver; remaining edge cases require client-level acceptance tests |
 | Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
-| Audio sources | Search, resolve, stream, errors | Built-in YouTube, LavaSrc and LavaSearch providers plus a bounded direct HTTP(S) file resolver; configurable download cap (128 MiB default), pending decoded-PCM cache (256 MiB default) and aggregate active-player PCM budget (256 MiB default); media is buffered before decode, so live streams and long sources are not yet supported |
-| Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode with packet-at-a-time callback and bounded Tokio-channel decoder; REST playback feeds NativePlayer through a bounded 8-frame PCM queue with underrun handling and producer backpressure; stateful PCM DSP; bounded HTTP download and decoded-PCM cache; 48 kHz stereo resampling and 20 ms packetization; native Opus encoding; RTP v2 sequence/timestamp construction |
+| Audio sources | Search, resolve, stream, errors | Built-in YouTube, LavaSrc and LavaSearch providers plus a bounded direct HTTP(S) file resolver; compressed source cache (256 MiB default), download cap (128 MiB default) and aggregate active-player PCM budget (256 MiB default); direct files are still downloaded completely before playback, so live network streams are not yet supported |
+| Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode with packet-at-a-time callback and bounded Tokio-channel decoder; REST playback feeds NativePlayer through a bounded 8-frame PCM queue with underrun handling and producer backpressure; stateful PCM DSP; bounded compressed-source cache and active-player PCM budget; 48 kHz stereo resampling and 20 ms packetization; native Opus encoding; RTP v2 sequence/timestamp construction |
 | Discord voice | Gateway voice handshake, DAVE, RTP, encryption | Native Voice Gateway v8 identify/resume, heartbeat, UDP IP discovery, encryption-mode negotiation, speaking state, DAVE MLS event handling, DAVE Opus encryption, RTP transport encryption, UDP keepalive and 20 ms audio output are wired together; automated protocol tests pass, but live Discord guild playback and reconnect behavior still require end-to-end validation |
 | Plugins | Native extension API | Rust plugin contract and built-in YouTube, LavaSrc and LavaSearch crates are implemented and registered statically; external dynamic plugin discovery/loading and a stable third-party ABI are not implemented |
-| Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players, pending decoded-cache bytes and active-player PCM usage/limit gauges |
+| Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players, compressed source-cache bytes and active-player PCM usage/limit gauges |
 
 ## Acceptance rule
 
@@ -35,13 +35,16 @@ and failure paths and the same test scenario has been checked against Lavalink v
 
 The native HTTP source path still buffers a complete direct HTTP(S) file before playback. The codec layer now exposes `decode_bytes_with`, which transfers each decoded packet to a caller-owned sink and enforces a cumulative PCM budget without collecting the whole decoded track. The bounded-channel decoder is now available as a reusable primitive, but the HTTP source adapter and NativePlayer are not yet wired through it. This is not yet end-to-end continuous or live streaming. Large/live source support remains pending.
 
-The playback queue is bounded and consumed directly by NativePlayer. For direct HTTP and plugin-resolved tracks, the current producer still owns the
-already-decoded frame vector, so the playback queue provides backpressure but
-does not yet reduce total PCM retained during source resolution. The decoder's
-bounded-channel API is ready for wiring to compressed source bytes; the HTTP
-source adapter still downloads and decodes the complete file before playback.
-Non-zero initial positions use the seekable decoded-frame path; live HTTP
-sources and end-to-end incremental network decoding remain unsupported.
+The playback queue is bounded and consumed directly by NativePlayer. Direct HTTP and
+plugin-resolved tracks are cached as compressed source bytes. Resolution performs
+a validation/duration decode pass that discards PCM packets instead of retaining the
+whole decoded track. Playback then decodes those bytes on a blocking worker into the
+bounded eight-frame channel, applying backpressure as NativePlayer consumes packets.
+A non-zero initial position uses the bounded full-decode fallback so seeking remains
+available for that initial load. The HTTP response itself is still downloaded fully
+before decoding; this is incremental PCM production from a buffered source, not live
+network streaming. Subsequent seek requests while a streamed source is active remain
+limited by the NativePlayer stream contract.
 
 The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are

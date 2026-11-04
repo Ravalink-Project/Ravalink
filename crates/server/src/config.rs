@@ -54,6 +54,8 @@ pub struct AudioConfig {
     pub opus_encoding_quality: u8,
     pub resampling_quality: String,
     pub max_source_download_bytes: usize,
+    /// Maximum compressed media bytes retained between resolution and playback.
+    /// The field name is kept for configuration compatibility with earlier releases.
     pub max_decoded_cache_bytes: usize,
     pub max_active_decoded_pcm_bytes: usize,
 }

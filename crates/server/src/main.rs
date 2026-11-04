@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use ravalink_audio::{AudioError, AudioTrack, DiscordVoiceConnection, HttpSourceManager, PcmFrame};
+use ravalink_audio::{AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager, PcmFrame, decode_bytes_limited, decode_bytes_to_channel};
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_plugin_api::PluginRegistry;
 use ravalink_plugin_lavasearch::LavaSearchPlugin;
@@ -227,7 +227,7 @@ async fn metrics_endpoint(State(state): State<AppState>) -> Response {
     let uptime_seconds = state.started_at.elapsed().as_secs_f64();
 
     let body = format!(
-        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_decoded_cache_bytes Decoded PCM bytes currently held by the HTTP source cache.\n# TYPE ravalink_decoded_cache_bytes gauge\nravalink_decoded_cache_bytes {cache_bytes}\n# HELP ravalink_active_decoded_pcm_bytes Decoded PCM bytes held by active native players.\n# TYPE ravalink_active_decoded_pcm_bytes gauge\nravalink_active_decoded_pcm_bytes {active_pcm_bytes}\n# HELP ravalink_active_decoded_pcm_limit_bytes Configured aggregate active-player PCM limit.\n# TYPE ravalink_active_decoded_pcm_limit_bytes gauge\nravalink_active_decoded_pcm_limit_bytes {active_pcm_limit}\n"
+        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_source_cache_bytes Compressed media bytes currently held by the HTTP source cache.\n# TYPE ravalink_source_cache_bytes gauge\nravalink_source_cache_bytes {cache_bytes}\n# HELP ravalink_active_decoded_pcm_bytes Decoded PCM bytes held by active native players.\n# TYPE ravalink_active_decoded_pcm_bytes gauge\nravalink_active_decoded_pcm_bytes {active_pcm_bytes}\n# HELP ravalink_active_decoded_pcm_limit_bytes Configured aggregate active-player PCM limit.\n# TYPE ravalink_active_decoded_pcm_limit_bytes gauge\nravalink_active_decoded_pcm_limit_bytes {active_pcm_limit}\n"
     );
 
     (
@@ -659,7 +659,7 @@ async fn update_player(
         object.remove("identifier");
     }
     if has_track_request && !no_replace_active {
-        let (track, frames) = match resolve_player_track(&state, &fields).await {
+        let (track, source) = match resolve_player_track(&state, &fields).await {
             Ok(resolved) => resolved,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
         };
@@ -671,28 +671,24 @@ async fn update_player(
             is_stream: track.info.is_stream,
         };
         if track.info.position > 0 {
-            if let Err(error) = state
-                .audio_players
-                .load_decoded_track(&session_id, &guild_id, audio_track, frames)
-                .await
-            {
+            let decode_source = source;
+            let frames = match tokio::task::spawn_blocking(move || decode_bytes_limited(
+                decode_source.bytes, decode_source.extension.as_deref(), decode_source.max_pcm_bytes
+            )).await {
+                Ok(Ok(frames)) => frames,
+                Ok(Err(error)) => return api_error(StatusCode::BAD_REQUEST, &error.message, &path),
+                Err(error) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("audio decoder task failed: {error}"), &path),
+            };
+            if let Err(error) = state.audio_players.load_decoded_track(&session_id, &guild_id, audio_track, frames).await {
                 return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
             }
         } else {
             let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
-            if let Err(error) = state
-                .audio_players
-                .load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver)
-                .await
-            {
+            if let Err(error) = state.audio_players.load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver).await {
                 return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
             }
             tokio::spawn(async move {
-                for frame in frames {
-                    if pcm_sender.send(Ok(frame)).await.is_err() {
-                        break;
-                    }
-                }
+                let _ = decode_bytes_to_channel(source.bytes, source.extension, source.max_pcm_bytes, pcm_sender).await;
             });
         }
         if track.info.position > 0
@@ -1236,7 +1232,7 @@ async fn wait_for_voice_retry(shutdown: &mut watch::Receiver<bool>, delay: Durat
 async fn resolve_player_track(
     state: &AppState,
     fields: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(Track, Vec<PcmFrame>), String> {
+) -> Result<(Track, CachedHttpSource), String> {
     if let Some(identifier) = fields.get("identifier").and_then(serde_json::Value::as_str) {
         if state.plugins.find(identifier).is_some() {
             return resolve_plugin_audio_track(state, identifier).await;
@@ -1246,12 +1242,10 @@ async fn resolve_player_track(
             .resolve(identifier)
             .await
             .map_err(|error| error.message)?;
-        let frames = state
-            .http_sources
-            .take_frames(&resolved.track.encoded)
+        let source = state.http_sources.take_source(&resolved.track.encoded)
             .map_err(|error| error.message)?
-            .ok_or_else(|| "decoded HTTP audio is no longer cached".to_owned())?;
-        return Ok((resolved.track, frames));
+            .ok_or_else(|| "compressed HTTP audio is no longer cached".to_owned())?;
+        return Ok((resolved.track, source));
     }
 
     let encoded = fields
@@ -1269,12 +1263,10 @@ async fn resolve_player_track(
         track.user_data = user_data.clone();
     }
 
-    let frames = state
-        .http_sources
-        .take_frames(&track.encoded)
+    let source = state.http_sources.take_source(&track.encoded)
         .map_err(|error| error.message)?;
-    if let Some(frames) = frames {
-        return Ok((track, frames));
+    if let Some(source) = source {
+        return Ok((track, source));
     }
     if matches!(
         track.info.source_name.as_str(),
@@ -1286,10 +1278,10 @@ async fn resolve_player_track(
             .uri
             .clone()
             .ok_or_else(|| "plugin track has no source URI".to_owned())?;
-        let (mut plugin_track, frames) = resolve_plugin_audio_track(state, &uri).await?;
+        let (mut plugin_track, source) = resolve_plugin_audio_track(state, &uri).await?;
         plugin_track.info.position = position;
         plugin_track.encoded = encode_track(&plugin_track).map_err(|error| error.message)?;
-        return Ok((plugin_track, frames));
+        return Ok((plugin_track, source));
     }
     if track.info.source_name != "http" {
         return Err(format!(
@@ -1307,19 +1299,17 @@ async fn resolve_player_track(
         .resolve(&uri)
         .await
         .map_err(|error| error.message)?;
-    let frames = state
-        .http_sources
-        .take_frames(&resolved.track.encoded)
+    let source = state.http_sources.take_source(&resolved.track.encoded)
         .map_err(|error| error.message)?
-        .ok_or_else(|| "decoded HTTP audio is no longer cached".to_owned())?;
+        .ok_or_else(|| "compressed HTTP audio is no longer cached".to_owned())?;
     track = resolved.track;
-    Ok((track, frames))
+    Ok((track, source))
 }
 
 async fn resolve_plugin_audio_track(
     state: &AppState,
     identifier: &str,
-) -> Result<(Track, Vec<PcmFrame>), String> {
+) -> Result<(Track, CachedHttpSource), String> {
     let result = state
         .plugins
         .load_tracks(identifier)
@@ -1341,12 +1331,10 @@ async fn resolve_plugin_audio_track(
         .resolve(stream_url)
         .await
         .map_err(|error| error.message)?;
-    let frames = state
-        .http_sources
-        .take_frames(&resolved.track.encoded)
+    let source = state.http_sources.take_source(&resolved.track.encoded)
         .map_err(|error| error.message)?
-        .ok_or_else(|| "decoded plugin audio is no longer cached".to_owned())?;
-    Ok((track, frames))
+        .ok_or_else(|| "compressed plugin audio is no longer cached".to_owned())?;
+    Ok((track, source))
 }
 
 async fn decode_track_endpoint(
