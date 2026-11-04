@@ -211,6 +211,28 @@ pub fn decode_bytes_limited(
     Ok(frames)
 }
 
+/// Decode a source into a bounded Tokio channel on a blocking worker.
+///
+/// The channel capacity is chosen by the caller. When it fills, the decoder
+/// worker blocks until the consumer advances, providing real backpressure
+/// instead of accumulating an unbounded decoded-PCM vector.
+pub async fn decode_bytes_to_channel(
+    bytes: Vec<u8>,
+    extension: Option<String>,
+    max_pcm_bytes: usize,
+    sender: tokio::sync::mpsc::Sender<PcmFrame>,
+) -> Result<(), AudioError> {
+    tokio::task::spawn_blocking(move || {
+        decode_bytes_with(bytes, extension.as_deref(), max_pcm_bytes, |frame| {
+            sender
+                .blocking_send(frame)
+                .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))
+        })
+    })
+    .await
+    .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))?
+}
+
 /// Stateful DSP chain for Lavalink's built-in PCM filters.
 ///
 /// The processor preserves filter history between frames, so callers should
@@ -846,6 +868,68 @@ mod tests {
 
         let error = decode_bytes_limited(wav, Some("wav"), 1).unwrap_err();
         assert!(error.message.contains("PCM memory limit"));
+    }
+
+    #[tokio::test]
+    async fn decoder_applies_backpressure_through_a_bounded_pcm_channel() {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&40u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&192_000u32.to_le_bytes());
+        wav.extend_from_slice(&4u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&4u32.to_le_bytes());
+        wav.extend_from_slice(&0i16.to_le_bytes());
+        wav.extend_from_slice(&16_384i16.to_le_bytes());
+
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let decode = tokio::spawn(decode_bytes_to_channel(
+            wav,
+            Some("wav".to_owned()),
+            64,
+            sender,
+        ));
+        let frame = receiver.recv().await.unwrap();
+        assert_eq!(frame.channels, 2);
+        assert_eq!(frame.sample_rate, 48_000);
+        decode.await.unwrap().unwrap();
+        assert!(receiver.recv().await.is_none());
+    }
+
+    #[test]
+    fn decoder_emits_pcm_frames_through_the_streaming_callback() {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&40u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&192_000u32.to_le_bytes());
+        wav.extend_from_slice(&4u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&4u32.to_le_bytes());
+        wav.extend_from_slice(&0i16.to_le_bytes());
+        wav.extend_from_slice(&16_384i16.to_le_bytes());
+
+        let mut emitted = 0;
+        decode_bytes_with(wav, Some("wav"), 64, |frame| {
+            emitted += 1;
+            assert_eq!(frame.channels, 2);
+            assert_eq!(frame.sample_rate, 48_000);
+            assert_eq!(frame.samples.len(), 2);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(emitted, 1);
     }
 
     #[test]
