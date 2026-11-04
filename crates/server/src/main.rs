@@ -391,6 +391,17 @@ async fn info_endpoint(headers: HeaderMap, State(state): State<AppState>) -> Res
         "applemusic".to_owned(),
         "deezer".to_owned(),
     ]);
+    for descriptor in state.plugins.descriptors() {
+        source_managers.extend(
+            descriptor
+                .capabilities
+                .iter()
+                .filter_map(|capability| capability.strip_prefix("source:"))
+                .map(str::to_owned),
+        );
+    }
+    source_managers.sort();
+    source_managers.dedup();
     let info = ServerInfo {
         plugins: state.plugins.infos(),
         source_managers,

@@ -14,7 +14,7 @@ Example `plugins/community-source/ravalink-plugin.toml`:
 name = "community-source"
 version = "1.0.0"
 description = "Community source integration"
-capabilities = ["track", "playlist", "search"]
+capabilities = ["track", "playlist", "search", "source:community"]
 identifier_prefix = "community:"
 api_version = 1
 program = "bin/community-source"
