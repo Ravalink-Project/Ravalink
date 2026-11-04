@@ -2,7 +2,7 @@ name: Native Docker
 
 on:
   push:
-    branches: [rust-native]
+    branches: ["master"]
     paths:
       - "Dockerfile"
       - ".dockerignore"
