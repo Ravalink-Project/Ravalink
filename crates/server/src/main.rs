@@ -214,6 +214,18 @@ fn invalid_player_field(
     })
 }
 
+fn requested_track_identifier(fields: &serde_json::Map<String, serde_json::Value>) -> Option<&str> {
+    fields
+        .get("identifier")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            fields
+                .get("track")
+                .and_then(|track| track.get("identifier"))
+                .and_then(serde_json::Value::as_str)
+        })
+}
+
 fn built_in_plugins(
     external: &[config::ExternalPluginConfig],
     plugin_directory: &std::path::Path,
@@ -707,17 +719,28 @@ async fn update_player(
         );
     }
 
+    let nested_track = fields.get("track").filter(|track| track.is_object());
+    let nested_identifier = nested_track.and_then(|track| track.get("identifier"));
+    let nested_encoded_track = nested_track.and_then(|track| track.get("encoded"));
     let has_identifier = fields
         .get("identifier")
-        .is_some_and(|value| !value.is_null());
+        .is_some_and(|value| !value.is_null())
+        || nested_identifier.is_some_and(|value| !value.is_null());
     let has_encoded_track = fields
         .get("encodedTrack")
-        .is_some_and(|value| !value.is_null());
-    let has_track_object = fields.get("track").is_some_and(|track| !track.is_null());
+        .is_some_and(|value| !value.is_null())
+        || nested_encoded_track.is_some_and(|value| !value.is_null());
+    let has_track_object = nested_track.is_some()
+        && !nested_encoded_track.is_some_and(serde_json::Value::is_null);
     let has_track_request = has_identifier || has_encoded_track || has_track_object;
     let encoded_track_is_null = fields
         .get("encodedTrack")
-        .is_some_and(serde_json::Value::is_null);
+        .is_some_and(serde_json::Value::is_null)
+        || nested_encoded_track.is_some_and(serde_json::Value::is_null);
+    let track_request_is_null = fields
+        .get("track")
+        .is_some_and(serde_json::Value::is_null)
+        || encoded_track_is_null;
     if fields.contains_key("track")
         && (fields.contains_key("identifier") || fields.contains_key("encodedTrack"))
     {
@@ -731,6 +754,13 @@ async fn update_player(
         return api_error(
             StatusCode::BAD_REQUEST,
             "Cannot specify both encodedTrack and identifier",
+            &path,
+        );
+    }
+    if nested_identifier.is_some() && nested_encoded_track.is_some() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Cannot specify both track.identifier and track.encoded",
             &path,
         );
     }
@@ -881,7 +911,7 @@ async fn update_player(
             serde_json::to_value(track).expect("Track serializes to JSON"),
         );
     } else if !no_replace_active
-        && (fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null)
+        && track_request_is_null
     {
         if let Some(previous) = previous_encoded_track.as_ref() {
             publish_track_end(
@@ -1476,16 +1506,31 @@ async fn resolve_player_track(
     state: &AppState,
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(Track, String), String> {
-    if let Some(identifier) = fields.get("identifier").and_then(serde_json::Value::as_str) {
-        if state.plugins.find(identifier).is_some() {
-            return resolve_plugin_audio_track(state, identifier).await;
+    let nested_track = fields.get("track").filter(|track| track.is_object());
+    let identifier = fields
+        .get("identifier")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            nested_track
+                .and_then(|track| track.get("identifier"))
+                .and_then(serde_json::Value::as_str)
+        });
+    if let Some(identifier) = identifier {
+        let (mut track, stream_url) = if state.plugins.find(identifier).is_some() {
+            resolve_plugin_audio_track(state, identifier).await?
+        } else {
+            let resolved = state
+                .http_sources
+                .resolve_stream_track(identifier)
+                .await
+                .map_err(|error| error.message)?;
+            (resolved.track, identifier.to_owned())
+        };
+        if let Some(user_data) = nested_track.and_then(|track| track.get("userData")) {
+            track.user_data = user_data.clone();
+            track.encoded = encode_track(&track).map_err(|error| error.message)?;
         }
-        let resolved = state
-            .http_sources
-            .resolve_stream_track(identifier)
-            .await
-            .map_err(|error| error.message)?;
-        return Ok((resolved.track, identifier.to_owned()));
+        return Ok((track, stream_url));
     }
 
     let encoded = fields
@@ -1871,6 +1916,42 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[test]
+    fn track_identifier_accepts_v4_nested_and_legacy_fields() {
+        let nested = serde_json::json!({
+            "track": {"identifier": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+        });
+        assert_eq!(
+            requested_track_identifier(nested.as_object().unwrap()),
+            Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        );
+
+        let legacy = serde_json::json!({"identifier": "ytsearch:ambient"});
+        assert_eq!(
+            requested_track_identifier(legacy.as_object().unwrap()),
+            Some("ytsearch:ambient")
+        );
+    }
+
+    #[tokio::test]
+    async fn nested_encoded_null_stops_the_current_track_using_v4_shape() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({"track": {"encoded": null}})),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(player["track"].is_null());
     }
 
     #[test]
