@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Block releases with unresolved compatibility rows
+        run: bash scripts/check-stable-readiness.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

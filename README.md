@@ -88,3 +88,8 @@ The default Compose port binding is localhost-only. See [Docker deployment](docs
 
 Rust itself is not treated as proof of performance. Benchmarks must compare both
 nodes on the same hardware and workloads.
+
+
+## Release readiness
+
+See [STABLE_RELEASE_CHECKLIST.md](STABLE_RELEASE_CHECKLIST.md) before publishing a stable release.
