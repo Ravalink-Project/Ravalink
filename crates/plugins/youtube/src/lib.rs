@@ -488,9 +488,7 @@ mod tests {
     async fn one_shot_http_response(status: &str, body: &str) -> String {
         use tokio::io::AsyncWriteExt;
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let status = status.to_owned();
         let body = body.to_owned();
