@@ -10,7 +10,13 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub audio: AudioConfig,
     pub metrics: MetricsConfig,
+    #[serde(default = "default_plugin_directory")]
+    pub plugin_directory: PathBuf,
     pub plugins: Vec<ExternalPluginConfig>,
+}
+
+fn default_plugin_directory() -> PathBuf {
+    PathBuf::from("plugins")
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -172,6 +178,9 @@ impl Config {
         if let Ok(value) = env::var("RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES") {
             config.audio.max_active_decoded_pcm_bytes =
                 parse_env("RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES", &value)?;
+        }
+        if let Ok(value) = env::var("RAVALINK_PLUGINS_DIRECTORY") {
+            config.plugin_directory = PathBuf::from(value);
         }
         if let Ok(value) = env::var("RAVALINK_METRICS_PROMETHEUS_ENABLED") {
             config.metrics.prometheus_enabled =

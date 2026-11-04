@@ -4,9 +4,26 @@ RavaLink supports community extensions as standalone Rust executables. This avoi
 loading third-party Rust dynamic libraries into the server process, where compiler,
 allocator and dependency-version differences can make a Rust ABI unsafe.
 
-## Configuration
+## Installation and configuration
 
-Add one `[[plugins]]` entry to `config/ravalink.toml`:
+Community plugins can be installed like Lavalink v4 plugins: place one plugin folder per extension inside `plugins/` (or set `plugin_directory` in the root configuration). Each folder contains a `ravalink-plugin.toml` manifest and its executable. RavaLink discovers these folders at startup in deterministic name order. The executable path in the manifest may be relative to its plugin folder.
+
+Example `plugins/community-source/ravalink-plugin.toml`:
+
+```toml
+name = "community-source"
+version = "1.0.0"
+description = "Community source integration"
+capabilities = ["track", "playlist", "search"]
+identifier_prefix = "community:"
+program = "bin/community-source"
+args = ["--stdio"]
+
+[environment]
+API_TOKEN = "provided-by-the-deployment"
+```
+
+The server can also register explicitly configured extensions using `[[plugins]]` in `config/ravalink.toml`:
 
 ```toml
 [[plugins]]

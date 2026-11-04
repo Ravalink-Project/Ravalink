@@ -225,6 +225,22 @@ impl RavaLinkPlugin for ProcessPlugin {
     }
 }
 
+/// Manifest for a community plugin installed in the plugins directory.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PluginManifest {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub identifier_prefix: String,
+    pub program: PathBuf,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub environment: HashMap<String, String>,
+}
+
 pub type SharedPlugin = Arc<dyn RavaLinkPlugin>;
 
 #[derive(Clone, Default)]
@@ -305,6 +321,95 @@ impl PluginRegistry {
             }
         }
         Ok(None)
+    }
+
+    /// Discover community extensions from one directory level of plugin folders.
+    ///
+    /// Each plugin folder contains a `ravalink-plugin.toml` manifest and an
+    /// executable. Relative executable paths are resolved against that folder.
+    pub fn load_directory(&mut self, directory: &std::path::Path) -> Result<usize, PluginError> {
+        if !directory.exists() {
+            return Ok(0);
+        }
+        let entries = std::fs::read_dir(directory).map_err(|error| {
+            PluginError::new("plugin-loader", format!("cannot read plugin directory: {error}"))
+        })?;
+        let mut folders = entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                PluginError::new("plugin-loader", format!("cannot enumerate plugins: {error}"))
+            })?;
+        folders.sort();
+        let mut loaded = 0;
+        for folder in folders {
+            if !folder.is_dir() {
+                continue;
+            }
+            let manifest_path = folder.join("ravalink-plugin.toml");
+            if !manifest_path.is_file() {
+                continue;
+            }
+            let manifest_text = std::fs::read_to_string(&manifest_path).map_err(|error| {
+                PluginError::new(
+                    folder.display().to_string(),
+                    format!("cannot read plugin manifest: {error}"),
+                )
+            })?;
+            let manifest: PluginManifest = toml::from_str(&manifest_text).map_err(|error| {
+                PluginError::new(
+                    folder.display().to_string(),
+                    format!("invalid plugin manifest: {error}"),
+                )
+            })?;
+            let name = manifest.name.trim();
+            let prefix = manifest.identifier_prefix.trim();
+            if name.is_empty()
+                || manifest.version.trim().is_empty()
+                || manifest.description.trim().is_empty()
+                || prefix.is_empty()
+                || manifest.capabilities.iter().any(|item| item.trim().is_empty())
+            {
+                return Err(PluginError::new(
+                    name,
+                    "plugin manifest contains empty required metadata",
+                ));
+            }
+            if self.plugins.iter().any(|plugin| {
+                let descriptor = plugin.descriptor();
+                descriptor.name.eq_ignore_ascii_case(name)
+            }) {
+                return Err(PluginError::new(name, "plugin name is already registered"));
+            }
+            let program = if manifest.program.is_absolute() {
+                manifest.program.clone()
+            } else {
+                folder.join(&manifest.program)
+            };
+            let program = program.canonicalize().map_err(|error| {
+                PluginError::new(
+                    name,
+                    format!("cannot resolve plugin executable '{}': {error}", program.display()),
+                )
+            })?;
+            if !program.is_file() {
+                return Err(PluginError::new(name, "plugin executable is not a file"));
+            }
+            self.register(ProcessPlugin::new(
+                PluginDescriptor {
+                    name: name.to_owned(),
+                    version: manifest.version,
+                    description: manifest.description,
+                    capabilities: manifest.capabilities,
+                },
+                prefix,
+                program,
+                manifest.args,
+                manifest.environment,
+            ));
+            loaded += 1;
+        }
+        Ok(loaded)
     }
 
     pub fn is_empty(&self) -> bool {

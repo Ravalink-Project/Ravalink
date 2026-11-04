@@ -204,7 +204,10 @@ fn invalid_player_field(
     })
 }
 
-fn built_in_plugins(external: &[config::ExternalPluginConfig]) -> PluginRegistry {
+fn built_in_plugins(
+    external: &[config::ExternalPluginConfig],
+    plugin_directory: &std::path::Path,
+) -> Result<PluginRegistry, String> {
     let mut plugins = PluginRegistry::default();
     plugins.register(YouTubePlugin::default());
     plugins.register(LavaSrcPlugin::default());
@@ -223,7 +226,11 @@ fn built_in_plugins(external: &[config::ExternalPluginConfig]) -> PluginRegistry
             plugin.environment.clone(),
         ));
     }
-    plugins
+    let loaded = plugins
+        .load_directory(plugin_directory)
+        .map_err(|error| error.to_string())?;
+    info!(loaded, directory = %plugin_directory.display(), "community plugins discovered");
+    Ok(plugins)
 }
 
 #[tokio::main]
@@ -256,7 +263,8 @@ async fn main() {
             config.audio.max_decoded_cache_bytes,
         ),
         playback_sources: PlaybackSourceStore::new(config.audio.max_decoded_cache_bytes),
-        plugins: built_in_plugins(&config.plugins),
+        plugins: built_in_plugins(&config.plugins, &config.plugin_directory)
+            .expect("failed to load configured plugins"),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
         system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
