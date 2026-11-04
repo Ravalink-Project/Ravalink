@@ -41,15 +41,17 @@ impl VoicePacketEncryptor {
     pub fn new(secret_key: [u8; 32], mode: VoiceEncryptionMode) -> Result<Self, AudioError> {
         let cipher = match mode {
             VoiceEncryptionMode::AeadAes256GcmRtpSize => {
-                VoiceCipher::Aes256Gcm(Box::new(Aes256Gcm::new_from_slice(&secret_key).map_err(|error| {
-                    AudioError::invalid(format!("invalid AES-256-GCM voice key: {error}"))
-                })?))
+                VoiceCipher::Aes256Gcm(Box::new(Aes256Gcm::new_from_slice(&secret_key).map_err(
+                    |error| AudioError::invalid(format!("invalid AES-256-GCM voice key: {error}")),
+                )?))
             }
-            VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize => VoiceCipher::XChaCha20Poly1305(Box::new(
-                XChaCha20Poly1305::new_from_slice(&secret_key).map_err(|error| {
-                    AudioError::invalid(format!("invalid XChaCha20 voice key: {error}"))
-                })?,
-            )),
+            VoiceEncryptionMode::AeadXChaCha20Poly1305RtpSize => {
+                VoiceCipher::XChaCha20Poly1305(Box::new(
+                    XChaCha20Poly1305::new_from_slice(&secret_key).map_err(|error| {
+                        AudioError::invalid(format!("invalid XChaCha20 voice key: {error}"))
+                    })?,
+                ))
+            }
             _ => VoiceCipher::Xsalsa20Poly1305(
                 XSalsa20Poly1305::new_from_slice(&secret_key).map_err(|error| {
                     AudioError::invalid(format!("invalid XSalsa20 voice key: {error}"))
