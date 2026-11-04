@@ -409,11 +409,12 @@ pub async fn decode_stream_to_channel(
     tokio::task::spawn_blocking(move || {
         let source = Box::new(StreamingMediaSource::new(receiver))
             as Box<dyn symphonia::core::io::MediaSource>;
-        let decoded = decode_media_source_with(source, extension.as_deref(), max_pcm_bytes, |frame| {
-            sender
-                .blocking_send(Ok(frame))
-                .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))
-        });
+        let decoded =
+            decode_media_source_with(source, extension.as_deref(), max_pcm_bytes, |frame| {
+                sender
+                    .blocking_send(Ok(frame))
+                    .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))
+            });
         if let Err(error) = decoded {
             let _ = sender.blocking_send(Err(AudioError::invalid(format!(
                 "audio decode failed: {}",

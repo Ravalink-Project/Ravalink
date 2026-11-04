@@ -172,7 +172,8 @@ impl HttpSourceManager {
         let producer = tokio::spawn(async move {
             let _permit = permit;
             loop {
-                let chunk = match tokio::time::timeout(Duration::from_secs(60), response.chunk()).await {
+                let chunk =
+                    match tokio::time::timeout(Duration::from_secs(60), response.chunk()).await {
                     Err(_) => {
                         let message = "HTTP media stream stalled for 60 seconds".to_owned();
                         let _ = compressed_sender.send(Err(message.clone())).await;
@@ -196,16 +197,19 @@ impl HttpSourceManager {
 
         let decoded = crate::decode_stream_to_channel(
             compressed_receiver,
-            Some(match probe {
-                "MPEG" => "mp3",
-                "WAV" => "wav",
-                "FLAC" => "flac",
-                "OGG" => "ogg",
-                "ADTS" => "aac",
-                "MP4" => "m4a",
-                "MATROSKA" => "webm",
-                _ => unreachable!("probe_name returns a known decoder format"),
-            }.to_owned()),
+            Some(
+                match probe {
+                    "MPEG" => "mp3",
+                    "WAV" => "wav",
+                    "FLAC" => "flac",
+                    "OGG" => "ogg",
+                    "ADTS" => "aac",
+                    "MP4" => "m4a",
+                    "MATROSKA" => "webm",
+                    _ => unreachable!("probe_name returns a known decoder format"),
+                }
+                .to_owned(),
+            ),
             max_pcm_bytes,
             sender,
         )
@@ -222,10 +226,14 @@ impl HttpSourceManager {
 
     async fn validate_url(&self, url: &reqwest::Url) -> Result<(), AudioError> {
         if !matches!(url.scheme(), "http" | "https") {
-            return Err(AudioError::invalid("only HTTP and HTTPS media URLs are supported"));
+            return Err(AudioError::invalid(
+                "only HTTP and HTTPS media URLs are supported",
+            ));
         }
         if !url.username().is_empty() || url.password().is_some() {
-            return Err(AudioError::invalid("HTTP source URLs must not embed credentials"));
+            return Err(AudioError::invalid(
+                "HTTP source URLs must not embed credentials",
+            ));
         }
         let host = url
             .host_str()
@@ -241,7 +249,9 @@ impl HttpSourceManager {
             )
             .await
             .map_err(|_| AudioError::invalid("HTTP source DNS lookup timed out"))?
-            .map_err(|error| AudioError::invalid(format!("cannot resolve HTTP source host: {error}")))?
+            .map_err(|error| {
+                AudioError::invalid(format!("cannot resolve HTTP source host: {error}"))
+            })?
             .collect::<Vec<_>>(),
         };
         if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {

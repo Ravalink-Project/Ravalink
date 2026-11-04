@@ -511,7 +511,11 @@ async fn load_tracks(
         return Json(LoadResult::empty()).into_response();
     }
 
-    match state.http_sources.resolve_stream_track(&query.identifier).await {
+    match state
+        .http_sources
+        .resolve_stream_track(&query.identifier)
+        .await
+    {
         Ok(resolved) => Json(LoadResult {
             load_type: "track",
             data: Some(serde_json::to_value(resolved.track).expect("Track serializes to JSON")),
