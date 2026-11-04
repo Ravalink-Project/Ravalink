@@ -784,7 +784,11 @@ mod tests {
     fn validates_gateway_endpoint() {
         assert_eq!(
             voice_gateway_url("eu-central123.discord.media:443").unwrap(),
-            "wss://eu-central123.discord.media:443/?v=8"
+            "wss://eu-central123.discord.media/?v=8"
+        );
+        assert_eq!(
+            voice_gateway_url("eu-central123.discord.media:8443").unwrap(),
+            "wss://eu-central123.discord.media:8443/?v=8"
         );
         assert!(voice_gateway_url("wss://evil.example/path").is_err());
         assert!(voice_gateway_url("user@host").is_err());
