@@ -930,6 +930,23 @@ async fn update_player(
             Ok(filters) => filters,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error.to_string(), &path),
         };
+        if matches!(
+            filters.timescale,
+            ravalink_protocol::Omissible::Present(Some(_))
+        ) {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "The timescale filter is not implemented by the native audio engine",
+                &path,
+            );
+        }
+        if !filters.plugin_filters.is_empty() {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "Plugin-specific filters are not supported by this node",
+                &path,
+            );
+        }
         state
             .audio_players
             .set_filters(&session_id, &guild_id, filters)
@@ -1874,6 +1891,26 @@ mod server_api_tests {
             );
         }
         assert!(info["plugins"].is_array());
+    }
+
+    #[tokio::test]
+    async fn update_player_rejects_filters_without_native_implementations() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        for filters in [
+            serde_json::json!({"timescale": {"speed": 1.2}}),
+            serde_json::json!({"communityFilter": {"amount": 0.5}}),
+        ] {
+            let response = update_player(
+                authorized_headers(),
+                State(state.clone()),
+                Path((session.id.clone(), "guild".into())),
+                Query(PlayerUpdateQuery::default()),
+                Json(serde_json::json!({"filters": filters})),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
     }
 
     #[tokio::test]
