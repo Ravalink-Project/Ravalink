@@ -68,9 +68,7 @@ impl PlaybackSourceStore {
             .map_or(0, |previous| previous.bytes.len());
         let bytes = source.bytes.len();
         let bytes_without_previous = state.bytes_used.saturating_sub(previous_bytes);
-        if bytes > self.max_bytes
-            || bytes_without_previous.saturating_add(bytes) > self.max_bytes
-        {
+        if bytes > self.max_bytes || bytes_without_previous.saturating_add(bytes) > self.max_bytes {
             return Err(());
         }
         let previous = state.entries.remove(&key);
@@ -1842,7 +1840,13 @@ mod server_api_tests {
         let first = ("session".to_owned(), "guild-a".to_owned());
         let second = ("session".to_owned(), "guild-b".to_owned());
 
-        assert!(store.replace(first.clone(), source(8)).await.unwrap().is_none());
+        assert!(
+            store
+                .replace(first.clone(), source(8))
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(store.bytes_used().await, 8);
         assert!(store.replace(second.clone(), source(9)).await.is_err());
         assert_eq!(store.bytes_used().await, 8);
