@@ -250,8 +250,7 @@ async fn run_voice_gateway_socket(
     mut speaking_rx: mpsc::UnboundedReceiver<bool>,
     endpoint: String,
 ) {
-    loop {
-        let mut heartbeat_timeout = heartbeat.period().saturating_mul(2);
+    let mut heartbeat_timeout = heartbeat.period().saturating_mul(2);
     let mut last_heartbeat_ack = tokio::time::Instant::now();
     loop {
         let mut connection_lost = false;
