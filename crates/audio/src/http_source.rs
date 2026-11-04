@@ -14,6 +14,7 @@ const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_CONCURRENT_RESOLVES: usize = 2;
 const DEFAULT_CONCURRENT_STREAMS: usize = 128;
+const MAX_COMPRESSED_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_PCM_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -206,8 +207,10 @@ impl HttpSourceManager {
                 let Some(chunk) = chunk else {
                     return Ok::<(), AudioError>(());
                 };
-                if compressed_sender.send(Ok(chunk.to_vec())).await.is_err() {
-                    return Ok(());
+                for part in chunk.chunks(MAX_COMPRESSED_CHUNK_BYTES) {
+                    if compressed_sender.send(Ok(part.to_vec())).await.is_err() {
+                        return Ok(());
+                    }
                 }
             }
         });
