@@ -83,15 +83,17 @@ impl HttpSourceManager {
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         self.validate_url(&url).await?;
         let client = self.streaming_client(&url).await?;
-        let response = tokio::time::timeout(
-            Duration::from_secs(15),
-            client.head(url.clone()).send(),
-        )
-            .await
-            .map_err(|_| AudioError::invalid("HTTP source metadata request timed out"))?
-            .map_err(|error| AudioError::invalid(format!("HTTP source metadata request failed: {error}")))?
-            .error_for_status()
-            .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
+        let response =
+            tokio::time::timeout(Duration::from_secs(15), client.head(url.clone()).send())
+                .await
+                .map_err(|_| AudioError::invalid("HTTP source metadata request timed out"))?
+                .map_err(|error| {
+                    AudioError::invalid(format!("HTTP source metadata request failed: {error}"))
+                })?
+                .error_for_status()
+                .map_err(|error| {
+                    AudioError::invalid(format!("HTTP source returned an error: {error}"))
+                })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -154,7 +156,9 @@ impl HttpSourceManager {
             .await
             .map_err(|error| AudioError::invalid(format!("HTTP source request failed: {error}")))?
             .error_for_status()
-            .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
+            .map_err(|error| {
+                AudioError::invalid(format!("HTTP source returned an error: {error}"))
+            })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -174,18 +178,18 @@ impl HttpSourceManager {
             loop {
                 let chunk =
                     match tokio::time::timeout(Duration::from_secs(60), response.chunk()).await {
-                    Err(_) => {
-                        let message = "HTTP media stream stalled for 60 seconds".to_owned();
-                        let _ = compressed_sender.send(Err(message.clone())).await;
-                        return Err(AudioError::invalid(message));
-                    }
-                    Ok(Err(error)) => {
-                        let message = format!("HTTP media stream failed: {error}");
-                        let _ = compressed_sender.send(Err(message.clone())).await;
-                        return Err(AudioError::invalid(message));
-                    }
-                    Ok(Ok(chunk)) => chunk,
-                };
+                        Err(_) => {
+                            let message = "HTTP media stream stalled for 60 seconds".to_owned();
+                            let _ = compressed_sender.send(Err(message.clone())).await;
+                            return Err(AudioError::invalid(message));
+                        }
+                        Ok(Err(error)) => {
+                            let message = format!("HTTP media stream failed: {error}");
+                            let _ = compressed_sender.send(Err(message.clone())).await;
+                            return Err(AudioError::invalid(message));
+                        }
+                        Ok(Ok(chunk)) => chunk,
+                    };
                 let Some(chunk) = chunk else {
                     return Ok::<(), AudioError>(());
                 };
@@ -277,7 +281,9 @@ impl HttpSourceManager {
             )
             .await
             .map_err(|_| AudioError::invalid("HTTP source DNS lookup timed out"))?
-            .map_err(|error| AudioError::invalid(format!("cannot resolve HTTP source host: {error}")))?
+            .map_err(|error| {
+                AudioError::invalid(format!("cannot resolve HTTP source host: {error}"))
+            })?
             .collect::<Vec<_>>(),
         };
         if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {

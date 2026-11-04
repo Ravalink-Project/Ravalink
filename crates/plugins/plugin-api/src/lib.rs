@@ -332,13 +332,19 @@ impl PluginRegistry {
             return Ok(0);
         }
         let entries = std::fs::read_dir(directory).map_err(|error| {
-            PluginError::new("plugin-loader", format!("cannot read plugin directory: {error}"))
+            PluginError::new(
+                "plugin-loader",
+                format!("cannot read plugin directory: {error}"),
+            )
         })?;
         let mut folders = entries
             .map(|entry| entry.map(|entry| entry.path()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
-                PluginError::new("plugin-loader", format!("cannot enumerate plugins: {error}"))
+                PluginError::new(
+                    "plugin-loader",
+                    format!("cannot enumerate plugins: {error}"),
+                )
             })?;
         folders.sort();
         let mut loaded = 0;
@@ -368,7 +374,10 @@ impl PluginRegistry {
                 || manifest.version.trim().is_empty()
                 || manifest.description.trim().is_empty()
                 || prefix.is_empty()
-                || manifest.capabilities.iter().any(|item| item.trim().is_empty())
+                || manifest
+                    .capabilities
+                    .iter()
+                    .any(|item| item.trim().is_empty())
             {
                 return Err(PluginError::new(
                     name,
@@ -389,7 +398,10 @@ impl PluginRegistry {
             let program = program.canonicalize().map_err(|error| {
                 PluginError::new(
                     name,
-                    format!("cannot resolve plugin executable '{}': {error}", program.display()),
+                    format!(
+                        "cannot resolve plugin executable '{}': {error}",
+                        program.display()
+                    ),
                 )
             })?;
             if !program.is_file() {
@@ -538,7 +550,10 @@ mod tests {
 
     #[test]
     fn plugin_directory_discovers_manifests_and_resolves_relative_binaries() {
-        use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
 
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)

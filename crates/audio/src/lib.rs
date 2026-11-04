@@ -332,7 +332,6 @@ pub async fn decode_bytes_to_channel_at(
     .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))?
 }
 
-
 /// A blocking, non-seekable reader fed by an asynchronous HTTP producer.
 /// The Tokio channel is bounded, so network buffering is independent of track size.
 struct StreamingMediaSource {
