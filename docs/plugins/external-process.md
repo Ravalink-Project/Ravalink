@@ -51,8 +51,9 @@ playback integrations must include a complete Lavalink track object and a playab
 RavaLink applies its normal public-IP, redirect, download-size, format and decoder
 checks to that URL.
 
-The host accepts at most 4 MiB of stdout per invocation and applies a 30-second
-wall-clock timeout to each plugin call. A timed-out child is killed. Stderr is
+The host accepts at most 4 MiB of stdout per invocation, runs at most two child
+processes concurrently per extension, and applies a 30-second wall-clock timeout
+to each plugin call. A timed-out child is killed. Stderr is
 discarded so diagnostic output cannot corrupt the JSON protocol; send diagnostics
 to a file or external logging service.
 

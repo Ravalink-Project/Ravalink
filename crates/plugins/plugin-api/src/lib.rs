@@ -80,6 +80,8 @@ pub trait RavaLinkPlugin: Send + Sync {
 
 /// Maximum JSON response accepted from an out-of-process extension.
 pub const MAX_PROCESS_PLUGIN_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+/// Maximum concurrent child-process invocations for each external extension.
+pub const MAX_CONCURRENT_PROCESS_PLUGIN_CALLS: usize = 2;
 
 /// A standalone Rust extension hosted as a short-lived child process.
 #[derive(Debug, Clone)]
@@ -89,6 +91,7 @@ pub struct ProcessPlugin {
     program: PathBuf,
     args: Vec<String>,
     environment: HashMap<String, String>,
+    process_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl ProcessPlugin {
@@ -105,6 +108,9 @@ impl ProcessPlugin {
             program: program.into(),
             args,
             environment,
+            process_slots: Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_PROCESS_PLUGIN_CALLS,
+            )),
         }
     }
 }
@@ -120,6 +126,17 @@ impl RavaLinkPlugin for ProcessPlugin {
     }
 
     async fn load_tracks(&self, identifier: &str) -> Result<Option<PluginLoadResult>, PluginError> {
+        let _permit = self
+            .process_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| {
+                PluginError::new(
+                    self.descriptor.name.clone(),
+                    "extension process runner is shutting down",
+                )
+            })?;
         let mut child = Command::new(&self.program)
             .args(&self.args)
             .env_clear()
