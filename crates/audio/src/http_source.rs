@@ -293,7 +293,6 @@ impl HttpSourceManager {
         }
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(None)
             .user_agent("RavaLink/0.1 native-audio")
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
