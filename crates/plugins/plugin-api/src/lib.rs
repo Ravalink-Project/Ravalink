@@ -593,7 +593,7 @@ mod tests {
                 capabilities: vec!["search".into()],
             },
             "external-slow:",
-            "/usr/bin/sleep",
+            "/bin/sleep",
             vec!["5".into()],
             HashMap::new(),
         );
