@@ -24,11 +24,14 @@ over Opus/WebM so the current Symphonia decoder can process the stream.
 
 Spotify URLs and `spotify:` URIs, plus Apple Music and Deezer links, are resolved to provider metadata,
 then matched against YouTube for a playable audio stream. Track identity and metadata
-remain associated with the original provider in the returned Lavalink track. Deezer
-albums, playlists and artist top tracks are expanded into playable tracks. Spotify
-albums, playlists and artist top tracks use the Web API; Apple Music albums and artist
-catalogs use the iTunes lookup API. Apple Music playlist expansion is not available
-through the current public catalog adapter.
+remain associated with the original provider in the returned Lavalink track. Matching
+selects a candidate using title, artist and duration similarity rather than blindly
+taking the first search result. Deezer albums, playlists and artist top tracks are
+expanded into playable tracks. Spotify albums, playlists and artist top tracks use the
+Web API; Spotify track metadata uses the Web API when credentials are present and
+falls back to public oEmbed metadata otherwise. Apple Music albums and artist catalogs
+use the iTunes lookup API. Apple Music playlist expansion uses the catalog API and
+requires a developer token in `RAVALINK_APPLE_MUSIC_TOKEN`.
 
 ## LavaSearch
 
@@ -37,7 +40,9 @@ generic `search:` prefix. Search results are resolved to playable provider track
 Album, artist and playlist discovery aggregates Deezer, Spotify (when credentials are configured) and Apple Music catalog results.
 
 Spotify search and collection expansion require a Spotify developer application's client credentials:
-`RAVALINK_SPOTIFY_CLIENT_ID` and `RAVALINK_SPOTIFY_CLIENT_SECRET`.
+`RAVALINK_SPOTIFY_CLIENT_ID` and `RAVALINK_SPOTIFY_CLIENT_SECRET`. Apple Music
+playlist expansion requires an Apple Music developer token in
+`RAVALINK_APPLE_MUSIC_TOKEN`.
 
 ## Current playback limitation
 

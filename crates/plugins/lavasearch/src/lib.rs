@@ -100,7 +100,7 @@ impl LavaSearchPlugin {
             SearchProvider::AppleMusic => self.apple_track_links(query).await?,
             SearchProvider::Deezer => self.deezer_track_links(query).await?,
             SearchProvider::All => {
-                let mut links = self.deezer_track_links(query).await?;
+                let mut links = self.deezer_track_links(query).await.unwrap_or_default();
                 links.extend(self.apple_track_links(query).await.unwrap_or_default());
                 links.extend(self.spotify_track_links(query).await.unwrap_or_default());
                 links
@@ -151,10 +151,9 @@ impl LavaSearchPlugin {
         };
         let deezer_data = self
             .deezer_search(endpoint, query)
-            .await?
-            .get("data")
-            .and_then(Value::as_array)
-            .cloned()
+            .await
+            .ok()
+            .and_then(|data| data.get("data").and_then(Value::as_array).cloned())
             .unwrap_or_default();
         let mut results = deezer_data
             .iter()
@@ -248,6 +247,12 @@ impl LavaSearchPlugin {
             }
         }
 
+        if results.is_empty() {
+            return Err(PluginError::new(
+                "lavasearch",
+                "no search provider returned results; check provider availability and credentials",
+            ));
+        }
         let mut payload = serde_json::Map::new();
         payload.insert(result_key.to_owned(), Value::Array(results));
         Ok(PluginLoadResult::new(

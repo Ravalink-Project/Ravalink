@@ -1,0 +1,14 @@
+services:
+  ravalink:
+    build: .
+    image: ghcr.io/ravalink-project/ravalink:dev
+    container_name: ravalink
+    restart: unless-stopped
+    environment:
+      RAVALINK_ADDRESS: 0.0.0.0
+      RAVALINK_PORT: 2333
+      RAVALINK_PASSWORD: ${RAVALINK_PASSWORD:?Set RAVALINK_PASSWORD in your environment}
+    ports:
+      - "127.0.0.1:2333:2333"
+    volumes:
+      - ./ravalink.toml:/etc/ravalink/ravalink.toml:ro

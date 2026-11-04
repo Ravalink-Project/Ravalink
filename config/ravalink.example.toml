@@ -4,7 +4,8 @@
 [server]
 address = "0.0.0.0"
 port = 2333
-password = "youshallnotpass"
+# Replace with a long random secret before exposing this node publicly.
+password = "replace-with-a-long-random-secret"
 player_update_interval = 5
 
 [logging]
@@ -18,8 +19,10 @@ opus_encoding_quality = 10
 resampling_quality = "low"
 # Maximum compressed HTTP(S) source size accepted by the direct-file resolver.
 max_source_download_bytes = 134217728
-# Maximum decoded PCM retained in memory across pending/loaded tracks.
+# Maximum decoded PCM retained in the pending loadtracks cache.
 max_decoded_cache_bytes = 268435456
+# Maximum decoded PCM held by active native players.
+max_active_decoded_pcm_bytes = 268435456
 
 [metrics]
 prometheus_enabled = false

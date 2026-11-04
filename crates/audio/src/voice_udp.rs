@@ -82,6 +82,17 @@ impl DiscordUdpTransport {
         self.external_port
     }
 
+    /// Send Discord's eight-byte UDP NAT keepalive nonce.
+    pub async fn send_keepalive(&self, nonce: u64) -> Result<(), AudioError> {
+        self.socket
+            .send(&nonce.to_be_bytes())
+            .await
+            .map(|_| ())
+            .map_err(|error| {
+                AudioError::invalid(format!("voice UDP keepalive send failed: {error}"))
+            })
+    }
+
     /// Send one RTP packet after encryption with the negotiated voice mode.
     pub async fn send_voice_packet(
         &self,
@@ -207,6 +218,30 @@ mod tests {
         );
 
         assert_eq!(server_task.await.unwrap(), encrypted_packet);
+    }
+
+    #[tokio::test]
+    async fn sends_eight_byte_udp_keepalive_nonce() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote = server.local_addr().unwrap();
+        let transport = DiscordUdpTransport::discover(remote, 7, Duration::from_secs(1));
+        let server_task = tokio::spawn(async move {
+            let mut request = [0_u8; DISCOVERY_PACKET_BYTES];
+            let (_, peer) = server.recv_from(&mut request).await.unwrap();
+            let response = response(7, "203.0.113.7", 50_001);
+            server.send_to(&response, peer).await.unwrap();
+            let mut keepalive = [0_u8; 8];
+            let (length, _) = server.recv_from(&mut keepalive).await.unwrap();
+            (length, keepalive)
+        });
+        let transport = transport.await.unwrap();
+        transport
+            .send_keepalive(0x0102_0304_0506_0708)
+            .await
+            .unwrap();
+        let (length, keepalive) = server_task.await.unwrap();
+        assert_eq!(length, 8);
+        assert_eq!(keepalive, 0x0102_0304_0506_0708_u64.to_be_bytes());
     }
 
     #[test]

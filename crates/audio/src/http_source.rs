@@ -115,9 +115,10 @@ impl HttpSourceManager {
             .content_length()
             .is_some_and(|length| length > self.max_download_bytes as u64)
         {
-            return Err(AudioError::invalid(
-                "HTTP source exceeds the 128 MiB download limit",
-            ));
+            return Err(AudioError::invalid(format!(
+                "HTTP source exceeds the configured {} byte download limit",
+                self.max_download_bytes
+            )));
         }
         let content_type = response
             .headers()
@@ -132,9 +133,10 @@ impl HttpSourceManager {
             .map_err(|error| AudioError::invalid(format!("cannot read HTTP source: {error}")))?
         {
             if body.len().saturating_add(chunk.len()) > self.max_download_bytes {
-                return Err(AudioError::invalid(
-                    "HTTP source exceeds the 128 MiB download limit",
-                ));
+                return Err(AudioError::invalid(format!(
+                    "HTTP source exceeds the configured {} byte download limit",
+                    self.max_download_bytes
+                )));
             }
             body.extend_from_slice(&chunk);
         }

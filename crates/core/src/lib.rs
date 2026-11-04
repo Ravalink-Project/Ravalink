@@ -1,15 +1,15 @@
 //! Runtime state shared by the protocol and audio layers.
 
 use ravalink_audio::{
-    AudioError, AudioPipeline, AudioTrack, DiscordUdpTransport, NativePlayer, PcmFrame,
-    PlayerSnapshot, RtpPacketizer, VoicePacketPipeline,
+    AudioError, AudioPipeline, AudioTrack, DaveVoiceSession, DiscordUdpTransport, NativePlayer,
+    PcmFrame, PlayerSnapshot, RtpPacketizer, VoicePacketPipeline,
 };
 use ravalink_protocol::Filters;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -286,6 +286,29 @@ impl PlayerStore {
         self.players.read().await.is_empty()
     }
 
+    /// Update server-owned playback state without accepting client-supplied state fields.
+    pub async fn set_runtime_state(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        position_ms: u64,
+        connected: bool,
+        ping_ms: i64,
+    ) {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let mut players = self.players.write().await;
+        if let Some(player) = players.get_mut(&key) {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or_default();
+            player["state"]["time"] = json!(now_ms);
+            player["state"]["position"] = json!(position_ms);
+            player["state"]["connected"] = json!(connected);
+            player["state"]["ping"] = json!(ping_ms);
+        }
+    }
+
     pub async fn playing_len(&self) -> usize {
         self.players
             .read()
@@ -336,6 +359,18 @@ mod player_store_tests {
     }
 
     #[tokio::test]
+    async fn runtime_state_updates_only_server_owned_state_fields() {
+        let store = PlayerStore::default();
+        store.update("s", "g", json!({"volume": 80})).await;
+        store.set_runtime_state("s", "g", 1500, true, -1).await;
+        let player = store.get("s", "g").await.unwrap();
+        assert_eq!(player["state"]["position"], 1500);
+        assert_eq!(player["state"]["connected"], true);
+        assert_eq!(player["state"]["ping"], -1);
+        assert_eq!(player["volume"], 80);
+    }
+
+    #[tokio::test]
     async fn session_cleanup_removes_only_its_players() {
         let store = PlayerStore::default();
         store.update("a", "1", json!({})).await;
@@ -354,6 +389,13 @@ pub struct DiscordVoiceState {
     pub token: String,
     pub endpoint: String,
     pub session_id: String,
+    pub channel_id: String,
+}
+
+#[derive(Default)]
+struct DecodedPcmBudget {
+    used_bytes: usize,
+    player_bytes: HashMap<PlayerKey, usize>,
 }
 
 #[derive(Clone)]
@@ -361,6 +403,8 @@ pub struct AudioPlayerStore {
     players: Arc<RwLock<HashMap<PlayerKey, SharedNativePlayer>>>,
     opus_complexity: u8,
     voice_states: Arc<RwLock<HashMap<PlayerKey, DiscordVoiceState>>>,
+    pcm_budget: Arc<Mutex<DecodedPcmBudget>>,
+    max_decoded_pcm_bytes: usize,
 }
 
 impl Default for AudioPlayerStore {
@@ -371,10 +415,37 @@ impl Default for AudioPlayerStore {
 
 impl AudioPlayerStore {
     pub fn new(opus_complexity: u8) -> Self {
+        Self::new_with_limits(opus_complexity, 256 * 1024 * 1024)
+    }
+
+    pub fn new_with_limits(opus_complexity: u8, max_decoded_pcm_bytes: usize) -> Self {
         Self {
             players: Arc::new(RwLock::new(HashMap::new())),
             opus_complexity: opus_complexity.min(10),
             voice_states: Arc::new(RwLock::new(HashMap::new())),
+            pcm_budget: Arc::new(Mutex::new(DecodedPcmBudget::default())),
+            max_decoded_pcm_bytes,
+        }
+    }
+
+    pub fn active_pcm_bytes(&self) -> usize {
+        self.pcm_budget
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .used_bytes
+    }
+
+    pub fn max_active_pcm_bytes(&self) -> usize {
+        self.max_decoded_pcm_bytes
+    }
+
+    fn release_pcm_budget(&self, key: &PlayerKey) {
+        let mut budget = self
+            .pcm_budget
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(bytes) = budget.player_bytes.remove(key) {
+            budget.used_bytes = budget.used_bytes.saturating_sub(bytes);
         }
     }
     async fn get_or_create(&self, session_id: &str, guild_id: &str) -> SharedNativePlayer {
@@ -401,7 +472,10 @@ impl AudioPlayerStore {
     ) -> Result<(), AudioError> {
         let player = self.get_or_create(session_id, guild_id).await;
         let mut player = player.lock().await;
-        player.start(track)
+        player.start(track)?;
+        drop(player);
+        self.release_pcm_budget(&(session_id.to_owned(), guild_id.to_owned()));
+        Ok(())
     }
 
     pub async fn pause(
@@ -430,6 +504,7 @@ impl AudioPlayerStore {
         if let Some(player) = self.get(session_id, guild_id).await {
             let _ = player.lock().await.stop();
         }
+        self.release_pcm_budget(&(session_id.to_owned(), guild_id.to_owned()));
     }
 
     pub async fn set_end_time(
@@ -466,9 +541,42 @@ impl AudioPlayerStore {
         track: AudioTrack,
         frames: Vec<PcmFrame>,
     ) -> Result<(), AudioError> {
+        let key = (session_id.to_owned(), guild_id.to_owned());
+        let new_bytes = frames.iter().fold(0_usize, |total, frame| {
+            total.saturating_add(
+                frame
+                    .samples
+                    .len()
+                    .saturating_mul(std::mem::size_of::<f32>()),
+            )
+        });
         let player = self.get_or_create(session_id, guild_id).await;
         let mut player = player.lock().await;
-        player.load_decoded_track(track, frames)
+        let mut budget = self
+            .pcm_budget
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let previous_bytes = budget.player_bytes.get(&key).copied().unwrap_or_default();
+        let next_total = budget
+            .used_bytes
+            .saturating_sub(previous_bytes)
+            .saturating_add(new_bytes);
+        if next_total > self.max_decoded_pcm_bytes {
+            return Err(AudioError {
+                message: format!(
+                    "decoded PCM budget exceeded: {next_total} bytes requested, limit is {} bytes",
+                    self.max_decoded_pcm_bytes
+                ),
+            });
+        }
+        player.load_decoded_track(track, frames)?;
+        budget.used_bytes = next_total;
+        if new_bytes == 0 {
+            budget.player_bytes.remove(&key);
+        } else {
+            budget.player_bytes.insert(key, new_bytes);
+        }
+        Ok(())
     }
 
     pub async fn next_encrypted_voice_packet(
@@ -482,6 +590,21 @@ impl AudioPlayerStore {
         };
         let mut player = player.lock().await;
         player.next_encrypted_voice_packet(pipeline)
+    }
+
+    /// Produce a DAVE-protected Opus frame and encrypt its RTP transport packet.
+    pub async fn next_dave_encrypted_voice_packet(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        pipeline: &mut VoicePacketPipeline,
+        dave: &mut DaveVoiceSession,
+    ) -> Result<Option<Vec<u8>>, AudioError> {
+        let Some(player) = self.get(session_id, guild_id).await else {
+            return Ok(None);
+        };
+        let mut player = player.lock().await;
+        player.next_dave_encrypted_voice_packet(pipeline, dave)
     }
 
     /// Produce, encrypt and send the next available Opus voice packet.
@@ -621,6 +744,19 @@ impl AudioPlayerStore {
         player.process_frame(frame)
     }
 
+    pub async fn take_completed_track(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+    ) -> Option<AudioTrack> {
+        let player = self.get(session_id, guild_id).await?;
+        let completed = player.lock().await.take_completed_track();
+        if completed.is_some() {
+            self.release_pcm_budget(&(session_id.to_owned(), guild_id.to_owned()));
+        }
+        completed
+    }
+
     pub async fn snapshot(&self, session_id: &str, guild_id: &str) -> Option<PlayerSnapshot> {
         let player = self.get(session_id, guild_id).await?;
         let player = player.lock().await;
@@ -662,6 +798,7 @@ impl AudioPlayerStore {
         let key = (session_id.to_owned(), guild_id.to_owned());
         let removed_player = self.players.write().await.remove(&key).is_some();
         let removed_voice = self.voice_states.write().await.remove(&key).is_some();
+        self.release_pcm_budget(&key);
         removed_player || removed_voice
     }
     pub async fn remove_session(&self, session_id: &str) -> usize {
@@ -673,6 +810,21 @@ impl AudioPlayerStore {
             .write()
             .await
             .retain(|(session, _), _| session != session_id);
+        let mut budget = self
+            .pcm_budget
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let keys = budget
+            .player_bytes
+            .keys()
+            .filter(|(session, _)| session == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in keys {
+            if let Some(bytes) = budget.player_bytes.remove(&key) {
+                budget.used_bytes = budget.used_bytes.saturating_sub(bytes);
+            }
+        }
         removed
     }
 
@@ -708,6 +860,7 @@ mod audio_player_store_tests {
             token: "voice-token".into(),
             endpoint: "voice.example:443".into(),
             session_id: "discord-session".into(),
+            channel_id: "voice-channel".into(),
         };
 
         store
@@ -736,6 +889,45 @@ mod audio_player_store_tests {
         assert!(snapshot.paused);
         assert!(store.snapshot("session-b", "guild-a").await.is_none());
         assert_eq!(store.playing_len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn decoded_pcm_budget_is_shared_and_released_when_a_track_stops() {
+        let store = AudioPlayerStore::new_with_limits(10, 24);
+        let track = |identifier: &str| AudioTrack {
+            identifier: identifier.into(),
+            title: identifier.into(),
+            author: "Artist".into(),
+            duration_ms: Some(60_000),
+            is_stream: false,
+        };
+        let frames = || {
+            vec![PcmFrame {
+                samples: vec![0.1; 4],
+                channels: 2,
+                sample_rate: 48_000,
+            }]
+        };
+
+        store
+            .load_decoded_track("session", "guild-a", track("a"), frames())
+            .await
+            .unwrap();
+        assert_eq!(store.active_pcm_bytes(), 16);
+        assert!(
+            store
+                .load_decoded_track("session", "guild-b", track("b"), frames())
+                .await
+                .is_err()
+        );
+
+        store.stop("session", "guild-a").await;
+        assert_eq!(store.active_pcm_bytes(), 0);
+        store
+            .load_decoded_track("session", "guild-b", track("b"), frames())
+            .await
+            .unwrap();
+        assert_eq!(store.active_pcm_bytes(), 16);
     }
 
     #[tokio::test]

@@ -12,9 +12,12 @@ pub mod http_source;
 pub mod opus;
 pub mod rtp;
 pub mod voice_crypto;
+pub mod voice_gateway;
+pub mod voice_gateway_client;
+pub use voice_gateway_client::DiscordVoiceConnection;
 pub mod voice_pcm;
 pub mod voice_udp;
-pub use dave::{DaveVoiceError, DaveVoiceSession};
+pub use dave::{DaveGatewayCommand, DaveVoiceController, DaveVoiceError, DaveVoiceSession};
 pub use http_source::{HttpSourceManager, ResolvedHttpTrack};
 pub use opus::OpusFrameEncoder;
 pub use rtp::RtpPacketizer;
@@ -502,6 +505,7 @@ pub struct NativePlayer {
     voice_packetizer: VoicePcmPacketizer,
     opus_encoder: Option<OpusFrameEncoder>,
     opus_complexity: u8,
+    completed_track: Option<AudioTrack>,
 }
 
 impl Default for NativePlayer {
@@ -528,7 +532,20 @@ impl NativePlayer {
             voice_packetizer: VoicePcmPacketizer::new(),
             opus_encoder: None,
             opus_complexity: opus_complexity.min(10),
+            completed_track: None,
         }
+    }
+
+    /// Take a track that ended naturally during audio processing.
+    /// Explicit stops and replacements do not populate this slot.
+    pub fn take_completed_track(&mut self) -> Option<AudioTrack> {
+        let completed = self.completed_track.take();
+        if completed.is_some() {
+            self.decoded_frames.clear();
+            self.next_frame_index = 0;
+            self.voice_packetizer.clear();
+        }
+        completed
     }
 
     pub fn snapshot(&self) -> PlayerSnapshot {
@@ -568,6 +585,20 @@ impl NativePlayer {
             return Ok(None);
         };
         pipeline.packetize_opus(&opus_packet).map(Some)
+    }
+
+    /// Build a voice packet with DAVE encryption followed by RTP transport encryption.
+    pub fn next_dave_encrypted_voice_packet(
+        &mut self,
+        pipeline: &mut crate::voice_crypto::VoicePacketPipeline,
+        dave: &mut crate::dave::DaveVoiceSession,
+    ) -> Result<Option<Vec<u8>>, AudioError> {
+        let Some(opus_packet) = self.next_opus_packet()? else {
+            return Ok(None);
+        };
+        pipeline
+            .packetize_opus_with_dave(&opus_packet, dave)
+            .map(Some)
     }
 
     /// Build the next unencrypted RTP packet from the native Opus encoder.
@@ -617,7 +648,7 @@ impl NativePlayer {
             return Ok(None);
         }
         let Some(frame) = self.decoded_frames.get(self.next_frame_index).cloned() else {
-            self.track = None;
+            self.completed_track = self.track.take();
             self.position_ms = 0;
             self.decoded_frames.clear();
             self.next_frame_index = 0;
@@ -671,7 +702,7 @@ impl NativePlayer {
                     (None, end_time) => end_time,
                 });
         if effective_end.is_some_and(|end_time| self.position_ms >= end_time) {
-            self.track = None;
+            self.completed_track = self.track.take();
             self.paused = false;
             self.position_ms = 0;
             self.end_time_ms = None;
@@ -684,6 +715,7 @@ impl AudioPipeline for NativePlayer {
     fn start(&mut self, track: AudioTrack) -> Result<(), AudioError> {
         self.processor.reset_state();
         self.track = Some(track);
+        self.completed_track = None;
         self.paused = false;
         self.position_ms = 0;
         self.end_time_ms = None;
@@ -748,6 +780,7 @@ impl AudioPipeline for NativePlayer {
 
     fn stop(&mut self) -> Result<(), AudioError> {
         self.track = None;
+        self.completed_track = None;
         self.paused = false;
         self.position_ms = 0;
         self.end_time_ms = None;
@@ -1078,5 +1111,29 @@ mod tests {
         processor.process(&mut input).unwrap();
         assert!((input.samples[0] - 0.75).abs() < 0.0001);
         assert!((input.samples[1] - 0.25).abs() < 0.0001);
+    }
+    #[test]
+    fn natural_completion_preserves_the_track_for_end_event_reporting() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "finished".into(),
+                    title: "Finished".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(20),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.1; 1_920], 2)],
+            )
+            .unwrap();
+
+        assert!(player.next_frame().unwrap().is_some());
+        assert!(player.snapshot().track.is_none());
+        assert_eq!(
+            player.take_completed_track().unwrap().identifier,
+            "finished"
+        );
+        assert!(player.take_completed_track().is_none());
     }
 }

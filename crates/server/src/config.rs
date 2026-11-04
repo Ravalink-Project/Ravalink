@@ -55,6 +55,7 @@ pub struct AudioConfig {
     pub resampling_quality: String,
     pub max_source_download_bytes: usize,
     pub max_decoded_cache_bytes: usize,
+    pub max_active_decoded_pcm_bytes: usize,
 }
 
 impl Default for AudioConfig {
@@ -66,6 +67,7 @@ impl Default for AudioConfig {
             resampling_quality: "low".into(),
             max_source_download_bytes: 128 * 1024 * 1024,
             max_decoded_cache_bytes: 256 * 1024 * 1024,
+            max_active_decoded_pcm_bytes: 256 * 1024 * 1024,
         }
     }
 }
@@ -148,6 +150,10 @@ impl Config {
             config.audio.max_decoded_cache_bytes =
                 parse_env("RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES", &value)?;
         }
+        if let Ok(value) = env::var("RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES") {
+            config.audio.max_active_decoded_pcm_bytes =
+                parse_env("RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES", &value)?;
+        }
         if let Ok(value) = env::var("RAVALINK_METRICS_PROMETHEUS_ENABLED") {
             config.metrics.prometheus_enabled =
                 parse_env("RAVALINK_METRICS_PROMETHEUS_ENABLED", &value)?;
@@ -191,6 +197,9 @@ fn validate_audio_config(audio: &AudioConfig) -> Result<(), String> {
     }
     if audio.max_decoded_cache_bytes == 0 {
         return Err("audio.max_decoded_cache_bytes must be greater than zero".to_owned());
+    }
+    if audio.max_active_decoded_pcm_bytes == 0 {
+        return Err("audio.max_active_decoded_pcm_bytes must be greater than zero".to_owned());
     }
     if audio.resampling_quality.trim().is_empty() {
         return Err("audio.resampling_quality must not be empty".to_owned());
@@ -269,6 +278,10 @@ mod tests {
         audio.max_decoded_cache_bytes = 0;
         assert!(validate_audio_config(&audio).is_err());
         audio.max_decoded_cache_bytes = 256 * 1024 * 1024;
+
+        audio.max_active_decoded_pcm_bytes = 0;
+        assert!(validate_audio_config(&audio).is_err());
+        audio.max_active_decoded_pcm_bytes = 256 * 1024 * 1024;
 
         audio.resampling_quality.clear();
         assert!(validate_audio_config(&audio).is_err());

@@ -9,21 +9,21 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Version | GET /version | Initial implementation |
 | Server info | GET /v4/info with Lavalink v4 field names | Initial implementation; advertises implemented DSP filters |
 | Statistics | GET /v4/stats | Initial implementation; CPU load pending |
-| Load tracks | GET /v4/loadtracks | Direct HTTP(S) file URLs are fetched, probed, decoded and returned as encoded tracks; search providers and live streams pending |
+| Load tracks | GET /v4/loadtracks | Direct HTTP(S) files plus built-in YouTube, Spotify, Apple Music and Deezer resolution/search; YouTube audio matching supplies playable streams for protected catalog providers; live streams and continuous streaming decode remain pending |
 | Decode track | GET /v4/decodetrack | Lavaplayer track-info v1-v3 decoding; known built-in source payloads supported |
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
-| WebSocket | User-Id, Client-Name, Session-Id headers, ready and stats messages | Handshake, session resumption, periodic stats and player-position updates are implemented; player updates are sent for active native tracks with connection state marked false until voice gateway negotiation is complete; track events are not emitted yet |
+| WebSocket | User-Id, Client-Name, Session-Id headers, ready, stats, player updates and track events | Handshake, session resumption, periodic stats and player-position updates are implemented; TrackStart, TrackEnd (finished, replaced, stopped, cleanup) are emitted by the native player lifecycle; gateway reconnection and multi-client edge cases still need parity tests |
 | Session update | PATCH /v4/sessions/{sessionId} | Initial implementation |
 | Route planner | GET /v4/routeplanner/status, POST /free/address, POST /free/all | Disabled-state semantics implemented: status returns 204; free operations return 500 until a native route planner is available |
 | List players | GET /v4/sessions/{sessionId}/players | In-memory player state and per-session/guild native audio-player contexts |
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
-| Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP track resolution loads decoded PCM into NativePlayer; volume, filters, pause, seek and stop update native state; Discord voice output/events still absent |
+| Update player | PATCH /v4/sessions/{sessionId}/players/{guildId} | Direct HTTP and enabled native-plugin track resolution load decoded PCM into NativePlayer; volume, filters, pause, seek, stop, replacement and end-time controls update native state; Discord voice output is connected to the native gateway driver; remaining edge cases require client-level acceptance tests |
 | Delete player | DELETE /v4/sessions/{sessionId}/players/{guildId} | Removes REST and native audio-player state |
-| Audio sources | Search, resolve, stream, errors | Bounded direct HTTP(S) file resolver only; configurable download cap (128 MiB default) and decoded PCM cache (256 MiB default); no search providers or live stream support |
+| Audio sources | Search, resolve, stream, errors | Built-in YouTube, LavaSrc and LavaSearch providers plus a bounded direct HTTP(S) file resolver; configurable download cap (128 MiB default), pending decoded-PCM cache (256 MiB default) and aggregate active-player PCM budget (256 MiB default); media is buffered before decode, so live streams and long sources are not yet supported |
 | Audio engine | Demux, decode, seek, filters, Opus | Symphonia in-memory demux/decode; stateful PCM DSP and REST-to-NativePlayer loading/control; bounded HTTP download and decoded-PCM cache; 48 kHz stereo resampling and 20 ms packetization; native Opus encoding; RTP v2 sequence/timestamp construction |
-| Discord voice | Gateway voice handshake, DAVE, RTP, encryption | RTP packet construction, legacy XSalsa20-Poly1305 normal/suffix/lite encryption, UDP IP discovery and encrypted RTP datagram sending are implemented; the native player can produce/encrypt/send packets through a cancellable 20 ms scheduler with pause/resume support; voice gateway handshake, automatic UDP negotiation, speaking state and DAVE are not implemented; voice state is stored from player updates |
-| Plugins | Native extension API | Not implemented |
-| Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players and decoded PCM cache byte gauges |
+| Discord voice | Gateway voice handshake, DAVE, RTP, encryption | Native Voice Gateway v8 identify/resume, heartbeat, UDP IP discovery, encryption-mode negotiation, speaking state, DAVE MLS event handling, DAVE Opus encryption, RTP transport encryption, UDP keepalive and 20 ms audio output are wired together; automated protocol tests pass, but live Discord guild playback and reconnect behavior still require end-to-end validation |
+| Plugins | Native extension API | Rust plugin contract and built-in YouTube, LavaSrc and LavaSearch crates are implemented and registered statically; external dynamic plugin discovery/loading and a stable third-party ABI are not implemented |
+| Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players, pending decoded-cache bytes and active-player PCM usage/limit gauges |
 
 ## Acceptance rule
 

@@ -1,0 +1,12 @@
+.git
+.github
+target
+site
+.cache
+.gradle
+.kotlin
+LavalinkServer
+branding
+docs
+*.iml
+.DS_Store

@@ -1,0 +1,28 @@
+name: Native Docker
+
+on:
+  push:
+    branches: [rust-native]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "compose.yml"
+      - "Cargo.toml"
+      - "crates/**"
+      - "config/**"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "compose.yml"
+      - "Cargo.toml"
+      - "crates/**"
+      - "config/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native image
+        run: docker build --tag ravalink:ci .

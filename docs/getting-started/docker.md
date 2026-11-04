@@ -1,60 +1,38 @@
----
-description: How to run Lavalink as a Docker container
----
+# Run RavaLink with Docker
 
-# Docker
+RavaLink is built as a native Rust binary. No Java runtime or JVM image is used.
 
-Docker images can be found under [packages](https://github.com/lavalink-devs/Lavalink/pkgs/container/lavalink) with old builds prior to `v3.7.4` being available on [Docker Hub](https://hub.docker.com/r/fredboat/lavalink/).
-Install [Docker](https://docs.docker.com/engine/install/) & [Docker Compose](https://docs.docker.com/compose/install/)
+## Build and start
 
-## Docker Image Variants
+Copy the example configuration and set a strong password:
 
-| Variant      | Description                                  | Java Version | User  | Group | Example                                       |
-|--------------|----------------------------------------------|--------------|-------|-------|-----------------------------------------------|
-| `Ubuntu`     | Default variant, based on Ubuntu             | 18           | 322   | 322   | `ghcr.io/lavalink-devs/lavalink:4`            |
-| `Alpine`     | Smaller image size, based on Alpine          | 17           | 322   | 322   | `ghcr.io/lavalink-devs/lavalink:4-alpine`     |
-| `Distroless` | Even smaller image size, based on Distroless | 17           | 65534 | 65534 | `ghcr.io/lavalink-devs/lavalink:4-distroless` |
-
-Create a `compose.yml` with the following content:
-
-```yaml title="compose.yml"
-services:
-  lavalink:
-    # pin the image version to Lavalink v4 and use the alpine variant for a smaller image size
-    image: ghcr.io/lavalink-devs/lavalink:4-alpine
-    container_name: lavalink
-    restart: unless-stopped
-    environment:
-      # set Java options here (6GB heap size)
-      - JAVA_TOOL_OPTIONS=-Xmx6G
-      # set lavalink server port
-      # - SERVER_PORT=2333
-      # set password for lavalink
-      # - LAVALINK_SERVER_PASSWORD=youshallnotpass
-    volumes:
-      # mount application.yml from the same directory, if you want to use environment variables remove this line below
-      - ./application.yml:/opt/Lavalink/application.yml
-      # persist plugins between restarts, make sure to create the folder & set the correct permissions and user/group id mentioned above
-      - ./plugins/:/opt/Lavalink/plugins/
-    networks:
-      - lavalink
-    expose:
-      # lavalink exposes port 2333 to connect to for other containers (this is for documentation purposes only)
-      - 2333
-    ports:
-      # you only need this if you want to make your lavalink accessible from outside of containers, keep in mind this will expose your lavalink to the internet
-      - "2333:2333"
-      # if you want to restrict access to localhost only
-      # - "127.0.0.1:2333:2333"
-networks:
-  # create a lavalink network you can add other containers to, to give them access to Lavalink
-  lavalink:
-    name: lavalink
+```sh
+cp config/ravalink.example.toml ravalink.toml
 ```
 
-Create an `application.yml` file in the same directory as the `compose.yml` file. ([Example here](../configuration/config/file.md#example-applicationyml)) or use environment variables ([Example here](../configuration/config/environment-variables.md#example-environment-variables))
+Set the password in the environment and start the container:
 
-Run `docker compose up -d`. See [Docker Compose Up](https://docs.docker.com/engine/reference/commandline/compose_up/)
+```sh
+export RAVALINK_PASSWORD="$(openssl rand -hex 32)"
+docker compose up -d --build
+```
 
-If your bot also runs in a docker container you can make that container join the lavalink network and use `lavalink` (service name) as the hostname to connect.
-See [Docker Networking](https://docs.docker.com/network/) & [Docker Compose Networking](https://docs.docker.com/compose/networking/)
+The supplied `compose.yml` binds port 2333 to `127.0.0.1` by default. If the node must be reachable from another machine, change the host binding deliberately and restrict access with a firewall or reverse proxy.
+
+The container runs as an unprivileged `ravalink` user. Its configuration is mounted read-only at `/etc/ravalink/ravalink.toml`; environment variables override values from the file.
+
+## Configuration
+
+The compose file requires `RAVALINK_PASSWORD`. Other supported variables are documented in the [README](../../README.md#configuration). Prometheus metrics are disabled by default and should not be exposed publicly without access controls.
+
+## Manual build
+
+```sh
+docker build -t ravalink:local .
+docker run --rm \
+  -p 127.0.0.1:2333:2333 \
+  -e RAVALINK_PASSWORD="$(openssl rand -hex 32)" \
+  ravalink:local
+```
+
+For persistent configuration, mount a TOML file at `/etc/ravalink/ravalink.toml`.

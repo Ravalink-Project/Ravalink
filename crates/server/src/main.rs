@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use ravalink_audio::{AudioTrack, HttpSourceManager, PcmFrame};
+use ravalink_audio::{AudioError, AudioTrack, DiscordVoiceConnection, HttpSourceManager, PcmFrame};
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_plugin_api::PluginRegistry;
 use ravalink_plugin_lavasearch::LavaSearchPlugin;
@@ -19,16 +19,20 @@ use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, LoadResult, MemoryStats, NodeStats, PlayerStateUpdate,
     PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage, Track,
-    WebSocketMessage, decode_track, encode_track,
+    TrackEndEvent, TrackEndReason, TrackEvent, TrackEventBase, WebSocketMessage, decode_track,
+    encode_track,
 };
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use sysinfo::System;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::watch};
 use tracing::{info, warn};
+
+type VoiceTaskMap = Arc<tokio::sync::Mutex<HashMap<(String, String), watch::Sender<bool>>>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -36,6 +40,7 @@ struct AppState {
     sessions: SessionStore,
     players: PlayerStore,
     audio_players: AudioPlayerStore,
+    voice_tasks: VoiceTaskMap,
     http_sources: HttpSourceManager,
     plugins: PluginRegistry,
     metrics_enabled: bool,
@@ -43,6 +48,7 @@ struct AppState {
     system: Arc<tokio::sync::Mutex<System>>,
     stats_cache: Arc<tokio::sync::Mutex<Option<(Instant, NodeStats)>>>,
     started_at: Instant,
+    events: tokio::sync::broadcast::Sender<(String, WebSocketMessage)>,
 }
 
 #[derive(Deserialize)]
@@ -125,11 +131,16 @@ async fn main() {
     let port = config.server.port;
     let password = config.server.password.clone();
 
+    let (events, _) = tokio::sync::broadcast::channel(256);
     let state = AppState {
         password,
         sessions: SessionStore::default(),
         players: PlayerStore::default(),
-        audio_players: AudioPlayerStore::new(config.audio.opus_encoding_quality),
+        audio_players: AudioPlayerStore::new_with_limits(
+            config.audio.opus_encoding_quality,
+            config.audio.max_active_decoded_pcm_bytes,
+        ),
+        voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         http_sources: HttpSourceManager::with_limits(
             config.audio.max_source_download_bytes,
             config.audio.max_decoded_cache_bytes,
@@ -140,18 +151,25 @@ async fn main() {
         system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
         stats_cache: Arc::new(tokio::sync::Mutex::new(None)),
         started_at: Instant::now(),
+        events,
     };
 
     let cleanup_sessions = state.sessions.clone();
     let cleanup_players = state.players.clone();
     let cleanup_audio_players = state.audio_players.clone();
+    let cleanup_voice_tasks = state.voice_tasks.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {
             interval.tick().await;
             for session_id in cleanup_sessions.prune_expired().await {
-                cleanup_players.remove_session(&session_id).await;
-                cleanup_audio_players.remove_session(&session_id).await;
+                cleanup_session_resources(
+                    &cleanup_players,
+                    &cleanup_audio_players,
+                    &cleanup_voice_tasks,
+                    &session_id,
+                )
+                .await;
             }
         }
     });
@@ -204,10 +222,12 @@ async fn metrics_endpoint(State(state): State<AppState>) -> Response {
     let players = state.players.len().await;
     let playing_players = state.audio_players.playing_len().await;
     let cache_bytes = state.http_sources.cached_bytes().unwrap_or_default();
+    let active_pcm_bytes = state.audio_players.active_pcm_bytes();
+    let active_pcm_limit = state.audio_players.max_active_pcm_bytes();
     let uptime_seconds = state.started_at.elapsed().as_secs_f64();
 
     let body = format!(
-        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_decoded_cache_bytes Decoded PCM bytes currently held by the HTTP source cache.\n# TYPE ravalink_decoded_cache_bytes gauge\nravalink_decoded_cache_bytes {cache_bytes}\n"
+        "# HELP ravalink_uptime_seconds Time since this RavaLink process started.\n# TYPE ravalink_uptime_seconds gauge\nravalink_uptime_seconds {uptime_seconds:.3}\n# HELP ravalink_sessions Number of active Lavalink sessions.\n# TYPE ravalink_sessions gauge\nravalink_sessions {sessions}\n# HELP ravalink_players Number of player states across sessions.\n# TYPE ravalink_players gauge\nravalink_players {players}\n# HELP ravalink_playing_players Number of players with a non-paused track.\n# TYPE ravalink_playing_players gauge\nravalink_playing_players {playing_players}\n# HELP ravalink_decoded_cache_bytes Decoded PCM bytes currently held by the HTTP source cache.\n# TYPE ravalink_decoded_cache_bytes gauge\nravalink_decoded_cache_bytes {cache_bytes}\n# HELP ravalink_active_decoded_pcm_bytes Decoded PCM bytes held by active native players.\n# TYPE ravalink_active_decoded_pcm_bytes gauge\nravalink_active_decoded_pcm_bytes {active_pcm_bytes}\n# HELP ravalink_active_decoded_pcm_limit_bytes Configured aggregate active-player PCM limit.\n# TYPE ravalink_active_decoded_pcm_limit_bytes gauge\nravalink_active_decoded_pcm_limit_bytes {active_pcm_limit}\n"
     );
 
     (
@@ -482,6 +502,21 @@ async fn delete_player(
             &format!("/v4/sessions/{session_id}"),
         );
     }
+    if let Some(encoded) = state
+        .players
+        .get(&session_id, &_guild_id)
+        .await
+        .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned))
+    {
+        publish_track_end(
+            &state,
+            &session_id,
+            &_guild_id,
+            encoded,
+            TrackEndReason::Cleanup,
+        );
+    }
+    shutdown_voice_task(&state, &session_id, &_guild_id).await;
     state.audio_players.remove(&session_id, &_guild_id).await;
     state.players.remove(&session_id, &_guild_id).await;
     StatusCode::NO_CONTENT.into_response()
@@ -545,6 +580,12 @@ async fn update_player(
         );
     }
 
+    let previous_encoded_track = state
+        .players
+        .get(&session_id, &guild_id)
+        .await
+        .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned));
+
     let no_replace_active = query.no_replace
         && has_track_request
         && state
@@ -564,18 +605,23 @@ async fn update_player(
                     &path,
                 );
             };
-            let (Some(token), Some(endpoint), Some(session_id)) = (
+            let (Some(token), Some(endpoint), Some(session_id), Some(channel_id)) = (
                 voice.get("token").and_then(serde_json::Value::as_str),
                 voice.get("endpoint").and_then(serde_json::Value::as_str),
                 voice.get("sessionId").and_then(serde_json::Value::as_str),
+                voice.get("channelId").and_then(serde_json::Value::as_str),
             ) else {
                 return api_error(
                     StatusCode::BAD_REQUEST,
-                    "Voice state requires token, endpoint and sessionId strings",
+                    "Voice state requires token, endpoint, sessionId and channelId strings",
                     &path,
                 );
             };
-            if token.is_empty() || endpoint.is_empty() || session_id.is_empty() {
+            if token.is_empty()
+                || endpoint.is_empty()
+                || session_id.is_empty()
+                || channel_id.is_empty()
+            {
                 return api_error(
                     StatusCode::BAD_REQUEST,
                     "Voice state fields cannot be empty",
@@ -586,6 +632,7 @@ async fn update_player(
                 token: token.to_owned(),
                 endpoint: endpoint.to_owned(),
                 session_id: session_id.to_owned(),
+                channel_id: channel_id.to_owned(),
             }))
         }
     } else {
@@ -638,6 +685,16 @@ async fn update_player(
         {
             return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
         }
+        if let Some(previous) = previous_encoded_track.as_ref() {
+            publish_track_end(
+                &state,
+                &session_id,
+                &guild_id,
+                previous.clone(),
+                TrackEndReason::Replaced,
+            );
+        }
+        publish_track_start(&state, &session_id, &guild_id, track.encoded.clone());
         let object = normalized_update
             .as_object_mut()
             .expect("validated JSON object");
@@ -650,6 +707,15 @@ async fn update_player(
     } else if !no_replace_active
         && (fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null)
     {
+        if let Some(previous) = previous_encoded_track.as_ref() {
+            publish_track_end(
+                &state,
+                &session_id,
+                &guild_id,
+                previous.clone(),
+                TrackEndReason::Stopped,
+            );
+        }
         state.audio_players.stop(&session_id, &guild_id).await;
         let object = normalized_update
             .as_object_mut()
@@ -725,10 +791,38 @@ async fn update_player(
     }
 
     if let Some(voice_update) = voice_update {
+        let previous = state
+            .audio_players
+            .voice_state(&session_id, &guild_id)
+            .await;
         state
             .audio_players
-            .set_voice_state(&session_id, &guild_id, voice_update)
+            .set_voice_state(&session_id, &guild_id, voice_update.clone())
             .await;
+        if previous != voice_update {
+            shutdown_voice_task(&state, &session_id, &guild_id).await;
+            if let Some(voice) = voice_update {
+                let (shutdown, shutdown_rx) = watch::channel(false);
+                state
+                    .voice_tasks
+                    .lock()
+                    .await
+                    .insert((session_id.clone(), guild_id.clone()), shutdown);
+                let task_state = state.clone();
+                let task_session_id = session_id.clone();
+                let task_guild_id = guild_id.clone();
+                tokio::spawn(async move {
+                    run_voice_task(
+                        task_state,
+                        task_session_id,
+                        task_guild_id,
+                        voice,
+                        shutdown_rx,
+                    )
+                    .await;
+                });
+            }
+        }
     }
 
     Json(
@@ -738,6 +832,265 @@ async fn update_player(
             .await,
     )
     .into_response()
+}
+
+async fn shutdown_voice_task(state: &AppState, session_id: &str, guild_id: &str) {
+    if let Some(shutdown) = state
+        .voice_tasks
+        .lock()
+        .await
+        .remove(&(session_id.to_owned(), guild_id.to_owned()))
+    {
+        let _ = shutdown.send(true);
+    }
+}
+
+async fn run_voice_task(
+    state: AppState,
+    session_id: String,
+    guild_id: String,
+    voice: DiscordVoiceState,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let Some(session) = state.sessions.get(&session_id).await else {
+        return;
+    };
+    let Ok(guild_id_number) = guild_id.parse::<u64>() else {
+        warn!(%guild_id, "Cannot connect voice: invalid guild ID");
+        return;
+    };
+    let Ok(channel_id) = voice.channel_id.parse::<u64>() else {
+        warn!(channel_id = %voice.channel_id, "Cannot connect voice: invalid channel ID");
+        return;
+    };
+
+    let mut retry_delay = Duration::from_secs(1);
+    loop {
+        if *shutdown.borrow() {
+            break;
+        }
+        let connection_result = tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+                continue;
+            }
+            result = tokio::time::timeout(
+                Duration::from_secs(15),
+                DiscordVoiceConnection::connect(
+                    guild_id_number,
+                    session.user_id,
+                    channel_id,
+                    &voice.session_id,
+                    &voice.token,
+                    &voice.endpoint,
+                ),
+            ) => result,
+        };
+        let mut connection = match connection_result {
+            Ok(Ok(connection)) => {
+                retry_delay = Duration::from_secs(1);
+                connection
+            }
+            Ok(Err(error)) => {
+                warn!(%error, %guild_id, ?retry_delay, "Discord voice connection failed; retrying");
+                if wait_for_voice_retry(&mut shutdown, retry_delay).await {
+                    break;
+                }
+                retry_delay = retry_delay.saturating_mul(2).min(Duration::from_secs(30));
+                continue;
+            }
+            Err(_) => {
+                warn!(%guild_id, "Discord voice handshake timed out; retrying");
+                if wait_for_voice_retry(&mut shutdown, retry_delay).await {
+                    break;
+                }
+                retry_delay = retry_delay.saturating_mul(2).min(Duration::from_secs(30));
+                continue;
+            }
+        };
+
+        let should_retry = run_voice_audio_loop(
+            &state,
+            &session_id,
+            &guild_id,
+            &mut connection,
+            &mut shutdown,
+        )
+        .await;
+        drop(connection);
+        state
+            .players
+            .set_runtime_state(&session_id, &guild_id, 0, false, -1)
+            .await;
+        if !should_retry || wait_for_voice_retry(&mut shutdown, retry_delay).await {
+            break;
+        }
+        retry_delay = retry_delay.saturating_mul(2).min(Duration::from_secs(30));
+    }
+}
+
+async fn run_voice_audio_loop(
+    state: &AppState,
+    session_id: &str,
+    guild_id: &str,
+    connection: &mut DiscordVoiceConnection,
+    shutdown: &mut watch::Receiver<bool>,
+) -> bool {
+    let mut interval = tokio::time::interval(Duration::from_millis(20));
+    interval.tick().await;
+    let mut speaking = false;
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+            }
+            _ = interval.tick() => {
+                if !connection.is_connected() {
+                    warn!(%guild_id, "Discord voice gateway disconnected");
+                    break;
+                }
+                let snapshot = state.audio_players.snapshot(session_id, guild_id).await;
+                let position_ms = snapshot.as_ref().map_or(0, |player| player.position_ms);
+                state
+                    .players
+                    .set_runtime_state(session_id, guild_id, position_ms, true, -1)
+                    .await;
+                let mut should_speak = snapshot
+                    .as_ref()
+                    .is_some_and(|player| player.track.is_some() && !player.paused);
+                if should_speak {
+                    should_speak = connection.dave.lock().await.can_send_audio();
+                }
+                if should_speak != speaking {
+                    if speaking
+                        && !should_speak
+                        && let Err(error) = send_voice_silence(connection).await
+                    {
+                        warn!(%error, %guild_id, "Failed to send Discord voice silence frames");
+                    }
+                    if let Err(error) = connection.set_speaking(should_speak) {
+                        warn!(%error, %guild_id, "Failed to update Discord speaking state");
+                        break;
+                    }
+                    speaking = should_speak;
+                }
+                if should_speak {
+                    let packet = {
+                        let mut dave = connection.dave.lock().await;
+                        state
+                            .audio_players
+                            .next_dave_encrypted_voice_packet(
+                                session_id,
+                                guild_id,
+                                &mut connection.pipeline,
+                                dave.session_mut(),
+                            )
+                            .await
+                    };
+                    match packet {
+                        Ok(Some(packet)) => {
+                            if let Err(error) = connection.transport.send_voice_packet(&packet).await {
+                                warn!(%error, %guild_id, "Failed to send Discord voice packet");
+                                break;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            warn!(%error, %guild_id, "Failed to encode Discord voice packet");
+                            break;
+                        }
+                    }
+
+                    if state
+                        .audio_players
+                        .take_completed_track(session_id, guild_id)
+                        .await
+                        .is_some()
+                    {
+                        if let Some(encoded) = state
+                            .players
+                            .get(session_id, guild_id)
+                            .await
+                            .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned))
+                        {
+                            publish_track_end(
+                                state,
+                                session_id,
+                                guild_id,
+                                encoded,
+                                TrackEndReason::Finished,
+                            );
+                        }
+                        state
+                            .players
+                            .update(session_id, guild_id, serde_json::json!({
+                                "track": null,
+                                "paused": false
+                            }))
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+    if speaking {
+        let _ = send_voice_silence(connection).await;
+        let _ = connection.set_speaking(false);
+    }
+    !*shutdown.borrow()
+}
+
+async fn send_voice_silence(connection: &mut DiscordVoiceConnection) -> Result<(), AudioError> {
+    const SILENCE_FRAME: [u8; 3] = [0xF8, 0xFF, 0xFE];
+    for _ in 0..5 {
+        let packet = {
+            let mut dave = connection.dave.lock().await;
+            connection
+                .pipeline
+                .packetize_opus_with_dave(&SILENCE_FRAME, dave.session_mut())?
+        };
+        connection.transport.send_voice_packet(&packet).await?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    Ok(())
+}
+
+fn publish_track_start(state: &AppState, session_id: &str, guild_id: &str, encoded_track: String) {
+    let _ = state.events.send((
+        session_id.to_owned(),
+        WebSocketMessage::Event(TrackEvent::TrackStart(TrackEventBase {
+            guild_id: guild_id.to_owned(),
+            track: encoded_track,
+        })),
+    ));
+}
+
+fn publish_track_end(
+    state: &AppState,
+    session_id: &str,
+    guild_id: &str,
+    encoded_track: String,
+    reason: TrackEndReason,
+) {
+    let _ = state.events.send((
+        session_id.to_owned(),
+        WebSocketMessage::Event(TrackEvent::TrackEnd(TrackEndEvent {
+            guild_id: guild_id.to_owned(),
+            track: encoded_track,
+            reason,
+        })),
+    ));
+}
+
+async fn wait_for_voice_retry(shutdown: &mut watch::Receiver<bool>, delay: Duration) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(delay) => *shutdown.borrow(),
+        changed = shutdown.changed() => changed.is_err() || *shutdown.borrow(),
+    }
 }
 
 async fn resolve_player_track(
@@ -955,6 +1308,7 @@ async fn handle_socket(
         (session.id, false)
     };
 
+    let mut event_rx = state.events.subscribe();
     let ready = serde_json::json!({
         "op": "ready",
         "resumed": resumed,
@@ -965,9 +1319,16 @@ async fn handle_socket(
         .await
         .is_err()
     {
-        state.sessions.remove(&session_id).await;
-        state.players.remove_session(&session_id).await;
-        state.audio_players.remove_session(&session_id).await;
+        state.sessions.disconnect(&session_id).await;
+        if state.sessions.get(&session_id).await.is_none() {
+            cleanup_session_resources(
+                &state.players,
+                &state.audio_players,
+                &state.voice_tasks,
+                &session_id,
+            )
+            .await;
+        }
         return;
     }
 
@@ -978,6 +1339,19 @@ async fn handle_socket(
     player_update_interval.tick().await;
     'socket: loop {
         tokio::select! {
+            event = event_rx.recv() => {
+                match event {
+                    Ok((event_session, message)) if event_session == session_id => {
+                        let payload = serde_json::to_string(&message)
+                            .expect("WebSocket event serializes to JSON");
+                        if socket.send(Message::Text(payload.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
             message = socket.recv() => {
                 match message {
                     Some(Ok(Message::Ping(payload))) => {
@@ -1018,19 +1392,23 @@ async fn handle_socket(
                     let Some(guild_id) = player["guildId"].as_str() else {
                         continue;
                     };
-                    let Some(snapshot) = state.audio_players.snapshot(&session_id, guild_id).await else {
-                        continue;
-                    };
-                    if snapshot.track.is_none() {
-                        continue;
-                    }
+                    let snapshot = state.audio_players.snapshot(&session_id, guild_id).await;
+                    let runtime = state.players.get(&session_id, guild_id).await;
+                    let connected = runtime
+                        .as_ref()
+                        .and_then(|player| player["state"]["connected"].as_bool())
+                        .unwrap_or(false);
+                    let ping = runtime
+                        .as_ref()
+                        .and_then(|player| player["state"]["ping"].as_i64())
+                        .unwrap_or(-1);
                     let message = WebSocketMessage::PlayerUpdate(PlayerUpdateMessage {
                         guild_id: guild_id.to_owned(),
                         state: PlayerStateUpdate {
                             time,
-                            position: snapshot.position_ms,
-                            connected: false,
-                            ping: Some(-1),
+                            position: snapshot.as_ref().map_or(0, |player| player.position_ms),
+                            connected,
+                            ping: Some(ping),
                         },
                     });
                     let payload = serde_json::to_string(&message)
@@ -1045,10 +1423,36 @@ async fn handle_socket(
 
     state.sessions.disconnect(&session_id).await;
     if state.sessions.get(&session_id).await.is_none() {
-        state.players.remove_session(&session_id).await;
-        state.audio_players.remove_session(&session_id).await;
+        cleanup_session_resources(
+            &state.players,
+            &state.audio_players,
+            &state.voice_tasks,
+            &session_id,
+        )
+        .await;
     }
     info!(%session_id, "WebSocket disconnected");
+}
+
+async fn cleanup_session_resources(
+    players: &PlayerStore,
+    audio_players: &AudioPlayerStore,
+    voice_tasks: &VoiceTaskMap,
+    session_id: &str,
+) {
+    players.remove_session(session_id).await;
+    audio_players.remove_session(session_id).await;
+    let mut tasks = voice_tasks.lock().await;
+    let keys = tasks
+        .keys()
+        .filter(|(session, _)| session == session_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in keys {
+        if let Some(shutdown) = tasks.remove(&key) {
+            let _ = shutdown.send(true);
+        }
+    }
 }
 
 fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
@@ -1080,6 +1484,7 @@ mod server_api_tests {
             sessions: SessionStore::default(),
             players: PlayerStore::default(),
             audio_players: AudioPlayerStore::default(),
+            voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_sources: HttpSourceManager::default(),
             plugins: built_in_plugins(),
             metrics_enabled: false,
@@ -1087,6 +1492,7 @@ mod server_api_tests {
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
             stats_cache: Arc::new(tokio::sync::Mutex::new(None)),
             started_at: Instant::now(),
+            events: tokio::sync::broadcast::channel(64).0,
         }
     }
 
@@ -1125,6 +1531,80 @@ mod server_api_tests {
                 Some(field)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn session_cleanup_stops_and_removes_all_voice_tasks() {
+        let state = state();
+        let (shutdown, mut receiver) = watch::channel(false);
+        state
+            .voice_tasks
+            .lock()
+            .await
+            .insert(("session".into(), "guild".into()), shutdown);
+        state
+            .players
+            .update("session", "guild", serde_json::json!({}))
+            .await;
+        state
+            .audio_players
+            .set_voice_state(
+                "session",
+                "guild",
+                Some(DiscordVoiceState {
+                    token: "token".into(),
+                    endpoint: "voice.example".into(),
+                    session_id: "discord-session".into(),
+                    channel_id: "channel".into(),
+                }),
+            )
+            .await;
+
+        cleanup_session_resources(
+            &state.players,
+            &state.audio_players,
+            &state.voice_tasks,
+            "session",
+        )
+        .await;
+
+        assert!(receiver.changed().await.is_ok());
+        assert!(*receiver.borrow());
+        assert!(state.players.is_empty().await);
+        assert!(state.audio_players.is_empty().await);
+        assert!(
+            state
+                .audio_players
+                .voice_state("session", "guild")
+                .await
+                .is_none()
+        );
+        assert!(state.voice_tasks.lock().await.is_empty());
+    }
+
+    #[test]
+    fn track_start_and_end_events_are_broadcast_with_lavalink_wire_shape() {
+        let state = state();
+        let mut receiver = state.events.subscribe();
+        publish_track_start(&state, "session", "guild", "encoded-track".into());
+        let (_, started) = receiver.try_recv().unwrap();
+        let started = serde_json::to_value(started).unwrap();
+        assert_eq!(started["op"], "event");
+        assert_eq!(started["type"], "TrackStartEvent");
+        assert_eq!(started["guildId"], "guild");
+        assert_eq!(started["track"], "encoded-track");
+
+        publish_track_end(
+            &state,
+            "session",
+            "guild",
+            "encoded-track".into(),
+            TrackEndReason::Finished,
+        );
+        let (_, ended) = receiver.try_recv().unwrap();
+        let ended = serde_json::to_value(ended).unwrap();
+        assert_eq!(ended["type"], "TrackEndEvent");
+        assert_eq!(ended["reason"], "finished");
     }
 
     #[tokio::test]

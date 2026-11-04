@@ -12,6 +12,7 @@ use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{Track, encode_track};
 use serde_json::{Value, json};
 use std::{
+    collections::HashSet,
     env,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -125,11 +126,17 @@ impl LavaSrcPlugin {
             }
         };
 
+        let valid_id = match provider {
+            MusicProvider::AppleMusic => id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')),
+            MusicProvider::Spotify | MusicProvider::Deezer => id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'),
+        };
         if !matches!(content_type, "track" | "album" | "playlist" | "artist")
             || id.is_empty()
-            || !id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            || !valid_id
         {
             return None;
         }
@@ -143,21 +150,69 @@ impl LavaSrcPlugin {
 
     async fn resolve_metadata(
         &self,
-        identifier: &str,
         parsed: &ProviderIdentifier,
     ) -> Result<ExternalTrack, PluginError> {
         match parsed.provider {
-            MusicProvider::Spotify => self.spotify_metadata(identifier).await,
+            MusicProvider::Spotify => self.spotify_metadata(&parsed.id).await,
             MusicProvider::AppleMusic => self.apple_music_metadata(&parsed.id).await,
             MusicProvider::Deezer => self.deezer_metadata(&parsed.id).await,
         }
     }
 
-    async fn spotify_metadata(&self, identifier: &str) -> Result<ExternalTrack, PluginError> {
+    async fn spotify_metadata(&self, track_id: &str) -> Result<ExternalTrack, PluginError> {
+        if let Ok(token) = self.spotify_access_token().await {
+            let response = self
+                .client
+                .get(format!("https://api.spotify.com/v1/tracks/{track_id}"))
+                .bearer_auth(token)
+                .send()
+                .await;
+            if let Ok(response) = response
+                && let Ok(response) = response.error_for_status()
+                && let Ok(data) = response.json::<Value>().await
+            {
+                let artists = data
+                    .get("artists")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|artist| artist.get("name").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let artwork_url = data
+                    .pointer("/album/images")
+                    .and_then(Value::as_array)
+                    .and_then(|images| images.first())
+                    .and_then(|image| image.get("url"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                return Ok(ExternalTrack {
+                    title: data
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Unknown title")
+                        .to_owned(),
+                    author: if artists.is_empty() {
+                        "Unknown".into()
+                    } else {
+                        artists
+                    },
+                    duration_ms: data.get("duration_ms").and_then(Value::as_u64),
+                    artwork_url,
+                    isrc: data
+                        .pointer("/external_ids/isrc")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                });
+            }
+        }
+
+        // Public oEmbed remains a no-credential fallback for track metadata.
+        let canonical_url = format!("https://open.spotify.com/track/{track_id}");
         let response = self
             .client
             .get("https://open.spotify.com/oembed")
-            .query(&[("url", identifier)])
+            .query(&[("url", canonical_url)])
             .send()
             .await
             .map_err(|error| {
@@ -293,8 +348,17 @@ impl LavaSrcPlugin {
         let query = format!("{} {}", metadata.title, metadata.author);
         let candidates = self.youtube.search_tracks(&query).await?;
         let candidate = candidates
-            .first()
-            .ok_or_else(|| PluginError::new("lavasrc", "no matching YouTube track was found"))?;
+            .iter()
+            .filter_map(|candidate| {
+                let title_similarity = text_similarity(&metadata.title, &candidate.info.title);
+                (title_similarity >= 0.25)
+                    .then_some((candidate, music_match_score(&metadata, candidate)))
+            })
+            .max_by(|left, right| left.1.total_cmp(&right.1))
+            .map(|(candidate, _)| candidate)
+            .ok_or_else(|| {
+                PluginError::new("lavasrc", "no sufficiently close YouTube match was found")
+            })?;
         let mut matched = self
             .youtube
             .resolve_video(&candidate.info.identifier)
@@ -322,7 +386,7 @@ impl LavaSrcPlugin {
         identifier: &str,
         parsed: &ProviderIdentifier,
     ) -> Result<Track, PluginError> {
-        let metadata = self.resolve_metadata(identifier, parsed).await?;
+        let metadata = self.resolve_metadata(parsed).await?;
         self.match_external_track(identifier, parsed, metadata)
             .await
     }
@@ -515,15 +579,127 @@ impl LavaSrcPlugin {
         ))
     }
 
+    async fn apple_music_playlist(
+        &self,
+        parsed: &ProviderIdentifier,
+    ) -> Result<PluginLoadResult, PluginError> {
+        let token = env::var("RAVALINK_APPLE_MUSIC_TOKEN").map_err(|_| {
+            PluginError::new(
+                "lavasrc",
+                "Apple Music playlist resolution requires RAVALINK_APPLE_MUSIC_TOKEN",
+            )
+        })?;
+        let data: Value = self
+            .client
+            .get(format!(
+                "https://api.music.apple.com/v1/catalog/us/playlists/{}",
+                parsed.id
+            ))
+            .bearer_auth(token)
+            .query(&[("include", "tracks")])
+            .send()
+            .await
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasrc",
+                    format!("Apple Music playlist request failed: {error}"),
+                )
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
+            })?
+            .json()
+            .await
+            .map_err(|error| {
+                PluginError::new(
+                    "lavasrc",
+                    format!("invalid Apple Music playlist response: {error}"),
+                )
+            })?;
+        let playlist = data
+            .pointer("/data/0")
+            .ok_or_else(|| PluginError::new("lavasrc", "Apple Music playlist was not found"))?;
+        let name = playlist
+            .pointer("/attributes/name")
+            .and_then(Value::as_str)
+            .unwrap_or("Apple Music playlist")
+            .to_owned();
+        let items = playlist
+            .pointer("/relationships/tracks/data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                PluginError::new("lavasrc", "Apple Music playlist contains no track list")
+            })?;
+        let mut tracks = Vec::new();
+        for item in items.iter().take(50) {
+            let Some(attributes) = item.get("attributes") else {
+                continue;
+            };
+            if item.get("type").and_then(Value::as_str) != Some("songs") {
+                continue;
+            }
+            let id = attributes
+                .pointer("/playParams/id")
+                .and_then(Value::as_str)
+                .or_else(|| item.get("id").and_then(Value::as_str));
+            let Some(id) = id else {
+                continue;
+            };
+            let artwork_url = attributes
+                .pointer("/artwork/url")
+                .and_then(Value::as_str)
+                .map(|url| url.replace("{w}", "1000").replace("{h}", "1000"));
+            let metadata = ExternalTrack {
+                title: attributes
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown title")
+                    .to_owned(),
+                author: attributes
+                    .get("artistName")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown")
+                    .to_owned(),
+                duration_ms: attributes.get("durationInMillis").and_then(Value::as_u64),
+                artwork_url,
+                isrc: attributes
+                    .get("isrc")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            let track_identifier = ProviderIdentifier {
+                provider: MusicProvider::AppleMusic,
+                content_type: "track".to_owned(),
+                id: id.to_owned(),
+            };
+            let uri = attributes
+                .get("url")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("https://music.apple.com/us/song/{id}"));
+            if let Ok(track) = self
+                .match_external_track(&uri, &track_identifier, metadata)
+                .await
+            {
+                tracks.push(track);
+            }
+        }
+        Ok(PluginLoadResult::new(
+            PluginLoadType::Playlist,
+            json!({
+                "info": {"name": name, "selectedTrack": -1},
+                "tracks": tracks,
+            }),
+        ))
+    }
+
     async fn apple_music_collection(
         &self,
         parsed: &ProviderIdentifier,
     ) -> Result<PluginLoadResult, PluginError> {
         if parsed.content_type == "playlist" {
-            return Err(PluginError::new(
-                "lavasrc",
-                "Apple Music playlist resolution requires the Apple Music catalog API",
-            ));
+            return self.apple_music_playlist(parsed).await;
         }
         let data: Value = self
             .client
@@ -734,6 +910,48 @@ impl LavaSrcPlugin {
     }
 }
 
+fn text_similarity(left: &str, right: &str) -> f32 {
+    let tokens = |value: &str| {
+        value
+            .chars()
+            .map(|character| {
+                if character.is_alphanumeric() {
+                    character.to_lowercase().collect::<String>()
+                } else {
+                    " ".to_owned()
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<HashSet<_>>()
+    };
+    let left = tokens(left);
+    let right = tokens(right);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let intersection = left.intersection(&right).count() as f32;
+    let union = left.union(&right).count() as f32;
+    intersection / union
+}
+
+fn music_match_score(metadata: &ExternalTrack, candidate: &Track) -> f32 {
+    let title = text_similarity(&metadata.title, &candidate.info.title);
+    let artist = text_similarity(&metadata.author, &candidate.info.author);
+    let duration = match (
+        metadata.duration_ms,
+        u64::try_from(candidate.info.length).ok(),
+    ) {
+        (Some(expected), Some(actual)) if expected > 0 && actual > 0 => {
+            let difference = expected.abs_diff(actual) as f32;
+            (1.0 - difference / expected.max(actual) as f32).clamp(0.0, 1.0)
+        }
+        _ => 0.0,
+    };
+    title * 5.0 + artist * 3.0 + duration * 2.0
+}
+
 #[async_trait]
 impl RavaLinkPlugin for LavaSrcPlugin {
     fn descriptor(&self) -> PluginDescriptor {
@@ -857,10 +1075,56 @@ mod tests {
         assert_eq!(apple.content_type, "track");
         assert_eq!(apple.id, "987654321");
 
+        let apple_playlist = LavaSrcPlugin::parse_identifier(
+            "https://music.apple.com/us/playlist/road-trip/pl.u-123456789",
+        )
+        .unwrap();
+        assert_eq!(apple_playlist.provider, MusicProvider::AppleMusic);
+        assert_eq!(apple_playlist.content_type, "playlist");
+        assert_eq!(apple_playlist.id, "pl.u-123456789");
+
         let deezer =
             LavaSrcPlugin::parse_identifier("https://www.deezer.com/track/123456").unwrap();
         assert_eq!(deezer.provider, MusicProvider::Deezer);
         assert_eq!(deezer.id, "123456");
+    }
+
+    #[test]
+    fn music_match_scoring_prefers_title_and_artist_agreement() {
+        let metadata = ExternalTrack {
+            title: "Midnight City".into(),
+            author: "M83".into(),
+            duration_ms: Some(240_000),
+            artwork_url: None,
+            isrc: None,
+        };
+        let exact = Track {
+            encoded: String::new(),
+            info: ravalink_protocol::TrackInfo {
+                identifier: "exact".into(),
+                is_seekable: true,
+                author: "M83".into(),
+                length: 240_000,
+                is_stream: false,
+                position: 0,
+                title: "Midnight City".into(),
+                uri: None,
+                source_name: "youtube".into(),
+                artwork_url: None,
+                isrc: None,
+            },
+            plugin_info: json!({}),
+            user_data: json!({}),
+        };
+        let wrong_artist = Track {
+            info: ravalink_protocol::TrackInfo {
+                author: "Other Artist".into(),
+                ..exact.info.clone()
+            },
+            ..exact.clone()
+        };
+        assert!(music_match_score(&metadata, &exact) > music_match_score(&metadata, &wrong_artist));
+        assert!(text_similarity("Midnight City", "Midnight City (Official Video)") > 0.2);
     }
 
     #[test]

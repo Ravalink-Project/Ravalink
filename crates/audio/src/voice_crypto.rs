@@ -3,7 +3,7 @@
 //! Supports the modern RTP-size AEAD modes required by Discord and retains
 //! legacy XSalsa modes for compatibility with older gateways.
 
-use crate::{AudioError, RtpPacketizer};
+use crate::{AudioError, DaveVoiceSession, RtpPacketizer};
 use aes_gcm::{
     Aes256Gcm, Nonce as AesNonce,
     aead::{Aead, KeyInit, Payload},
@@ -199,6 +199,22 @@ impl VoicePacketPipeline {
         let rtp_packet = self.packetizer.packetize(opus_payload)?;
         self.encryptor.encrypt_rtp_packet(&rtp_packet)
     }
+
+    /// Apply Discord DAVE end-to-end encryption before RTP transport encryption.
+    ///
+    /// DAVE protects the Opus payload; the negotiated voice cipher then protects
+    /// the complete RTP packet for transport over Discord's UDP endpoint.
+    pub fn packetize_opus_with_dave(
+        &mut self,
+        opus_payload: &[u8],
+        dave: &mut DaveVoiceSession,
+    ) -> Result<Vec<u8>, AudioError> {
+        let dave_payload = dave.encrypt_opus(opus_payload).map_err(|error| {
+            AudioError::invalid(format!("DAVE Opus encryption failed: {error}"))
+        })?;
+        let rtp_packet = self.packetizer.packetize(dave_payload.as_ref())?;
+        self.encryptor.encrypt_rtp_packet(&rtp_packet)
+    }
 }
 
 fn nonce_bytes<const N: usize>(counter: u32) -> [u8; N] {
@@ -327,6 +343,38 @@ mod tests {
         assert_eq!(&packet[8..12], &0x1234_5678_u32.to_be_bytes());
         assert_eq!(&packet[packet.len() - 4..], &[0, 0, 0, 0]);
         assert!(packet.len() > 12 + 16 + 4);
+    }
+
+    #[test]
+    fn dave_layer_is_applied_before_transport_encryption() {
+        use crate::DaveVoiceSession;
+
+        let mut dave = DaveVoiceSession::new(1234, 5678).unwrap();
+        dave.prepare_epoch(0, 0).unwrap();
+
+        let mut plain_pipeline = VoicePacketPipeline::new(
+            0x1234_5678,
+            42,
+            960,
+            [3; 32],
+            VoiceEncryptionMode::AeadAes256GcmRtpSize,
+        )
+        .unwrap();
+        let mut dave_pipeline = VoicePacketPipeline::new(
+            0x1234_5678,
+            42,
+            960,
+            [3; 32],
+            VoiceEncryptionMode::AeadAes256GcmRtpSize,
+        )
+        .unwrap();
+
+        let opus = [0xaa, 0xbb, 0xcc];
+        let plain = plain_pipeline.packetize_opus(&opus).unwrap();
+        let protected = dave_pipeline
+            .packetize_opus_with_dave(&opus, &mut dave)
+            .unwrap();
+        assert_eq!(protected, plain);
     }
 
     #[test]

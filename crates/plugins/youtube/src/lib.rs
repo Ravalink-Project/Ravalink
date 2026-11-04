@@ -75,11 +75,8 @@ impl YouTubePlugin {
         let playlist_id = url.query_value("list").map(str::to_owned);
         let start_seconds = url
             .query_value("t")
-            .and_then(|value| value.trim_end_matches('s').parse::<u64>().ok())
-            .or_else(|| {
-                url.query_value("start")
-                    .and_then(|value| value.parse().ok())
-            });
+            .and_then(parse_timestamp)
+            .or_else(|| url.query_value("start").and_then(parse_timestamp));
 
         let video_id = video_id.filter(|id| valid_video_id(id));
         if video_id.is_none() && playlist_id.is_none() {
@@ -341,6 +338,41 @@ fn track_from_video(video: &Value) -> Result<Track, PluginError> {
     Ok(track)
 }
 
+fn parse_timestamp(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(seconds);
+    }
+
+    let mut total = 0_u64;
+    let mut digits = String::new();
+    let mut saw_unit = false;
+    for character in value.chars() {
+        if character.is_ascii_digit() {
+            digits.push(character);
+            continue;
+        }
+        let multiplier = match character {
+            'h' => 3_600,
+            'm' => 60,
+            's' => 1,
+            _ => return None,
+        };
+        let amount = digits.parse::<u64>().ok()?;
+        total = total.checked_add(amount.checked_mul(multiplier)?)?;
+        digits.clear();
+        saw_unit = true;
+    }
+    if !digits.is_empty() {
+        let amount = digits.parse::<u64>().ok()?;
+        if !saw_unit {
+            return Some(amount);
+        }
+        total = total.checked_add(amount)?;
+    }
+    saw_unit.then_some(total)
+}
+
 fn valid_video_id(value: &str) -> bool {
     value.len() == 11
         && value
@@ -446,6 +478,21 @@ mod tests {
             Some("lofi hip hop")
         );
         assert!(YouTubePlugin::is_search("ytmsearch:ambient"));
+    }
+
+    #[test]
+    fn parses_numeric_and_unit_based_video_timestamps() {
+        assert_eq!(parse_timestamp("90"), Some(90));
+        assert_eq!(parse_timestamp("90s"), Some(90));
+        assert_eq!(parse_timestamp("1m30s"), Some(90));
+        assert_eq!(parse_timestamp("1h2m3s"), Some(3_723));
+        assert_eq!(parse_timestamp("not-a-time"), None);
+        assert_eq!(
+            YouTubePlugin::parse_identifier("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s")
+                .unwrap()
+                .start_seconds,
+            Some(90)
+        );
     }
 
     #[test]
