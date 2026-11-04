@@ -1,5 +1,5 @@
 //! Lavalink v4 WebSocket event payloads.
-use crate::{CpuStats, FrameStats, MemoryStats};
+use crate::{CpuStats, FrameStats, MemoryStats, Track};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8,7 +8,7 @@ pub enum WebSocketMessage {
     Ready(ReadyMessage),
     PlayerUpdate(PlayerUpdateMessage),
     Stats(StatsMessage),
-    Event(TrackEvent),
+    Event(Box<TrackEvent>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,14 +66,14 @@ pub enum TrackEvent {
 #[serde(rename_all = "camelCase")]
 pub struct TrackEventBase {
     pub guild_id: String,
-    pub track: String,
+    pub track: Track,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackEndEvent {
     pub guild_id: String,
-    pub track: String,
+    pub track: Track,
     pub reason: TrackEndReason,
 }
 
@@ -91,7 +91,7 @@ pub enum TrackEndReason {
 #[serde(rename_all = "camelCase")]
 pub struct TrackExceptionEvent {
     pub guild_id: String,
-    pub track: String,
+    pub track: Track,
     pub exception: TrackException,
 }
 
@@ -115,7 +115,7 @@ pub enum ExceptionSeverity {
 #[serde(rename_all = "camelCase")]
 pub struct TrackStuckEvent {
     pub guild_id: String,
-    pub track: String,
+    pub track: Track,
     pub threshold_ms: u64,
 }
 
@@ -131,6 +131,27 @@ pub struct WebSocketClosedEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_track() -> Track {
+        Track {
+            encoded: "encoded-track".into(),
+            info: crate::TrackInfo {
+                identifier: "test-id".into(),
+                is_seekable: true,
+                author: "test artist".into(),
+                length: 1_000,
+                is_stream: false,
+                position: 0,
+                title: "test track".into(),
+                uri: Some("https://www.youtube.com/watch?v=test-id".into()),
+                source_name: "youtube".into(),
+                artwork_url: None,
+                isrc: None,
+            },
+            plugin_info: serde_json::json!({}),
+            user_data: serde_json::json!({}),
+        }
+    }
 
     #[test]
     fn ready_message_matches_lavalink_wire_shape() {
@@ -192,14 +213,42 @@ mod tests {
 
     #[test]
     fn track_end_event_uses_expected_discriminator_and_reason() {
-        let event = WebSocketMessage::Event(TrackEvent::TrackEnd(TrackEndEvent {
+        let event = WebSocketMessage::Event(Box::new(TrackEvent::TrackEnd(TrackEndEvent {
             guild_id: "1".into(),
-            track: "encoded".into(),
+            track: test_track(),
             reason: TrackEndReason::Finished,
-        }));
+        })));
         let json = serde_json::to_value(event).unwrap();
         assert_eq!(json["op"], "event");
         assert_eq!(json["type"], "TrackEndEvent");
         assert_eq!(json["reason"], "finished");
+        assert_eq!(json["track"]["encoded"], "encoded-track");
+        assert_eq!(json["track"]["info"]["title"], "test track");
+    }
+
+    #[test]
+    fn track_exception_and_stuck_events_embed_track_objects() {
+        let exception =
+            WebSocketMessage::Event(Box::new(TrackEvent::TrackException(TrackExceptionEvent {
+                guild_id: "1".into(),
+                track: test_track(),
+                exception: TrackException {
+                    message: Some("decoder failed".into()),
+                    severity: ExceptionSeverity::Fault,
+                    cause: "DecodeError".into(),
+                },
+            })));
+        let stuck = WebSocketMessage::Event(Box::new(TrackEvent::TrackStuck(TrackStuckEvent {
+            guild_id: "1".into(),
+            track: test_track(),
+            threshold_ms: 10_000,
+        })));
+
+        let exception_json = serde_json::to_value(exception).unwrap();
+        let stuck_json = serde_json::to_value(stuck).unwrap();
+        assert_eq!(exception_json["type"], "TrackExceptionEvent");
+        assert_eq!(exception_json["track"]["info"]["identifier"], "test-id");
+        assert_eq!(stuck_json["type"], "TrackStuckEvent");
+        assert_eq!(stuck_json["track"]["encoded"], "encoded-track");
     }
 }

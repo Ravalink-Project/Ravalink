@@ -1060,12 +1060,19 @@ async fn send_voice_silence(connection: &mut DiscordVoiceConnection) -> Result<(
 }
 
 fn publish_track_start(state: &AppState, session_id: &str, guild_id: &str, encoded_track: String) {
+    let track = match decode_track(&encoded_track) {
+        Ok(track) => track,
+        Err(error) => {
+            warn!(%error, %guild_id, "cannot publish TrackStartEvent with an invalid encoded track");
+            return;
+        }
+    };
     let _ = state.events.send((
         session_id.to_owned(),
-        WebSocketMessage::Event(TrackEvent::TrackStart(TrackEventBase {
+        WebSocketMessage::Event(Box::new(TrackEvent::TrackStart(TrackEventBase {
             guild_id: guild_id.to_owned(),
-            track: encoded_track,
-        })),
+            track,
+        }))),
     ));
 }
 
@@ -1076,13 +1083,20 @@ fn publish_track_end(
     encoded_track: String,
     reason: TrackEndReason,
 ) {
+    let track = match decode_track(&encoded_track) {
+        Ok(track) => track,
+        Err(error) => {
+            warn!(%error, %guild_id, "cannot publish TrackEndEvent with an invalid encoded track");
+            return;
+        }
+    };
     let _ = state.events.send((
         session_id.to_owned(),
-        WebSocketMessage::Event(TrackEvent::TrackEnd(TrackEndEvent {
+        WebSocketMessage::Event(Box::new(TrackEvent::TrackEnd(TrackEndEvent {
             guild_id: guild_id.to_owned(),
-            track: encoded_track,
+            track,
             reason,
-        })),
+        }))),
     ));
 }
 
@@ -1583,27 +1597,48 @@ mod server_api_tests {
     }
 
     #[test]
-    fn track_start_and_end_events_are_broadcast_with_lavalink_wire_shape() {
+    fn track_start_and_end_events_include_full_lavalink_track_objects() {
         let state = state();
         let mut receiver = state.events.subscribe();
-        publish_track_start(&state, "session", "guild", "encoded-track".into());
+        let track = Track {
+            encoded: String::new(),
+            info: ravalink_protocol::TrackInfo {
+                identifier: "test-id".into(),
+                is_seekable: true,
+                author: "test artist".into(),
+                length: 1_000,
+                is_stream: false,
+                position: 0,
+                title: "test track".into(),
+                uri: Some("https://www.youtube.com/watch?v=test-id".into()),
+                source_name: "youtube".into(),
+                artwork_url: None,
+                isrc: None,
+            },
+            plugin_info: serde_json::json!({}),
+            user_data: serde_json::json!({}),
+        };
+        let encoded = encode_track(&track).unwrap();
+        publish_track_start(&state, "session", "guild", encoded.clone());
         let (_, started) = receiver.try_recv().unwrap();
         let started = serde_json::to_value(started).unwrap();
         assert_eq!(started["op"], "event");
         assert_eq!(started["type"], "TrackStartEvent");
         assert_eq!(started["guildId"], "guild");
-        assert_eq!(started["track"], "encoded-track");
+        assert_eq!(started["track"]["encoded"], encoded);
+        assert_eq!(started["track"]["info"]["title"], "test track");
 
         publish_track_end(
             &state,
             "session",
             "guild",
-            "encoded-track".into(),
+            encoded.clone(),
             TrackEndReason::Finished,
         );
         let (_, ended) = receiver.try_recv().unwrap();
         let ended = serde_json::to_value(ended).unwrap();
         assert_eq!(ended["type"], "TrackEndEvent");
+        assert_eq!(ended["track"]["encoded"], encoded);
         assert_eq!(ended["reason"], "finished");
     }
 

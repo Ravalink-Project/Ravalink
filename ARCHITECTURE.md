@@ -12,7 +12,7 @@ This repository is one Git repository and one Cargo workspace:
 - `crates/audio`: Symphonia media decoding, native PCM player state and stateful DSP processing.
 - `crates/server`: HTTP/WebSocket server and process entry point.
 
-Source adapters and streaming, Opus output, full filter/time-stretch parity, voice transport, plugin API and metrics remain to be implemented. They will remain in this same repository.
+Source adapters, native PCM/Opus output, Discord voice transport, the built-in plugin API and Prometheus metrics are implemented in this workspace. Continuous streaming decode, full Lavalink filter/time-stretch parity, external dynamic plugin loading and live Discord end-to-end validation remain incomplete.
 
 ## Dependency direction
 
