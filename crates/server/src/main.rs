@@ -885,10 +885,9 @@ async fn update_player(
             .snapshot(&session_id, &guild_id)
             .await
             .is_some_and(|snapshot| snapshot.track.is_some())
+        && let Err(error) = seek_player_source(&state, &session_id, &guild_id, position).await
     {
-        if let Err(error) = seek_player_source(&state, &session_id, &guild_id, position).await {
-            return api_error(StatusCode::BAD_REQUEST, &error, &path);
-        }
+        return api_error(StatusCode::BAD_REQUEST, &error, &path);
     }
 
     if let Some(voice_update) = voice_update {
