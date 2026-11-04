@@ -177,7 +177,8 @@ impl DiscordVoiceConnection {
                             | VoiceGatewayAction::ClientDisconnect { .. }
                             | VoiceGatewayAction::DaveEvent { .. }
                             | VoiceGatewayAction::DaveBinaryEvent { .. }
-                            | VoiceGatewayAction::Resumed => {}
+                            | VoiceGatewayAction::Resumed
+                            | VoiceGatewayAction::HeartbeatAck => {}
                         }
                     }
                 }
@@ -250,6 +251,9 @@ async fn run_voice_gateway_socket(
     endpoint: String,
 ) {
     loop {
+        let heartbeat_timeout = heartbeat.period().saturating_mul(2);
+    let mut last_heartbeat_ack = tokio::time::Instant::now();
+    loop {
         let mut connection_lost = false;
         'read: loop {
             let incoming = tokio::select! {
@@ -287,6 +291,11 @@ async fn run_voice_gateway_socket(
                         break 'read;
                     }
                     continue;
+                }
+                _ = tokio::time::sleep_until(last_heartbeat_ack + heartbeat_timeout) => {
+                    tracing::warn!("Discord voice heartbeat acknowledgement timed out");
+                    connection_lost = true;
+                    break 'read;
                 }
                 incoming = socket.next() => incoming,
             };
@@ -384,6 +393,10 @@ async fn run_voice_gateway_socket(
                     }
                     VoiceGatewayAction::ClientDisconnect { user_id } => {
                         dave.lock().await.on_client_disconnect(user_id);
+                        Ok(())
+                    }
+                    VoiceGatewayAction::HeartbeatAck => {
+                        last_heartbeat_ack = tokio::time::Instant::now();
                         Ok(())
                     }
                     VoiceGatewayAction::StartHeartbeat { .. }
@@ -582,7 +595,8 @@ async fn resume_voice_gateway(
                 }
                 VoiceGatewayAction::Resumed => resumed = true,
                 VoiceGatewayAction::DiscoverUdp { .. }
-                | VoiceGatewayAction::StartVoiceOutput { .. } => {}
+                | VoiceGatewayAction::StartVoiceOutput { .. }
+                | VoiceGatewayAction::HeartbeatAck => {}
             }
         }
         if resumed {

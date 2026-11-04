@@ -69,6 +69,7 @@ pub enum VoiceGatewayAction {
         user_id: u64,
     },
     Resumed,
+    HeartbeatAck,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct VoiceReady {
@@ -301,7 +302,7 @@ impl VoiceGatewayMachine {
                 }])
             }
             3 => Ok(vec![VoiceGatewayAction::Send(self.heartbeat(now_ms))]),
-            6 => Ok(Vec::new()),
+            6 => Ok(vec![VoiceGatewayAction::HeartbeatAck]),
             9 => {
                 if self.state == VoiceGatewayState::Closed {
                     return Err(self.unexpected(opcode));
@@ -601,6 +602,17 @@ mod tests {
             vec![VoiceGatewayAction::Resumed]
         );
         assert_eq!(m.state(), VoiceGatewayState::Ready);
+    }
+
+    #[test]
+    fn reports_heartbeat_acknowledgements_to_the_transport_driver() {
+        let mut m = machine();
+        m.handle_message(r#"{"op":8,"d":{"heartbeat_interval":10000}}"#, 0)
+            .unwrap();
+        assert_eq!(
+            m.handle_message(r#"{"op":6,"d":null}"#, 456).unwrap(),
+            vec![VoiceGatewayAction::HeartbeatAck]
+        );
     }
 
     #[test]
