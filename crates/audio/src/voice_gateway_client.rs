@@ -459,7 +459,6 @@ async fn run_voice_gateway_socket(
             break;
         }
     }
-    }
     connected.store(false, Ordering::Release);
 }
 
