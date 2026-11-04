@@ -158,22 +158,13 @@ pub fn decode_bytes_with<F>(
     bytes: impl Into<std::sync::Arc<[u8]>>,
     extension: Option<&str>,
     max_pcm_bytes: usize,
-    mut on_frame: F,
+    on_frame: F,
 ) -> Result<(), AudioError>
 where
     F: FnMut(PcmFrame) -> Result<(), AudioError>,
 {
-    use std::io::{Cursor, ErrorKind};
-    use symphonia::core::{
-        audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
-        formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint,
-    };
-
+    use std::io::Cursor;
     let bytes: std::sync::Arc<[u8]> = bytes.into();
-    let mut hint = Hint::new();
-    if let Some(extension) = extension {
-        hint.with_extension(extension);
-    }
     let source = Box::new(Cursor::new(bytes)) as Box<dyn symphonia::core::io::MediaSource>;
     decode_media_source_with(source, extension, max_pcm_bytes, on_frame)
 }
@@ -193,6 +184,10 @@ where
         audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
         formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint,
     };
+    let mut hint = Hint::new();
+    if let Some(extension) = extension {
+        hint.with_extension(extension);
+    }
     let source = MediaSourceStream::new(source, Default::default());
     let probed = symphonia::default::get_probe()
         .format(
