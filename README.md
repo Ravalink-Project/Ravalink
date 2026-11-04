@@ -56,7 +56,7 @@ Configuration is loaded from `config/ravalink.toml` by default, or from
 - `RAVALINK_METRICS_PROMETHEUS_ENDPOINT`
 
 Built-in provider configuration:
-- `RAVALINK_YOUTUBE_API_BASE` (Invidious-compatible API base URL)
+- `RAVALINK_YOUTUBE_API_BASE` (comma-separated Invidious-compatible API failover URLs)
 - `RAVALINK_SPOTIFY_CLIENT_ID` and `RAVALINK_SPOTIFY_CLIENT_SECRET` (Spotify search and collection API)
 - `RAVALINK_APPLE_MUSIC_TOKEN` (Apple Music playlist catalog API)
 

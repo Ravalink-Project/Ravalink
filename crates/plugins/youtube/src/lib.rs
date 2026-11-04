@@ -1,7 +1,7 @@
 //! Native YouTube source plugin.
 //!
-//! The default extractor uses an Invidious-compatible API. The base URL can be
-//! replaced with RAVALINK_YOUTUBE_API_BASE when an instance is unavailable.
+//! The default extractor uses an Invidious-compatible API. Configure one or
+//! more comma-separated instance URLs with RAVALINK_YOUTUBE_API_BASE for failover.
 
 use async_trait::async_trait;
 use ravalink_plugin_api::{
@@ -14,7 +14,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct YouTubePlugin {
     client: reqwest::Client,
-    api_base: String,
+    api_bases: Vec<String>,
 }
 
 impl Default for YouTubePlugin {
@@ -40,10 +40,19 @@ impl YouTubePlugin {
             .user_agent("RavaLink/0.1 (native YouTube source)")
             .build()
             .expect("valid default HTTP client");
-        Self {
-            client,
-            api_base: api_base.into().trim_end_matches('/').to_owned(),
-        }
+        let api_bases = api_base
+            .into()
+            .split(',')
+            .map(str::trim)
+            .filter(|base| !base.is_empty())
+            .map(|base| base.trim_end_matches('/').to_owned())
+            .collect::<Vec<_>>();
+        let api_bases = if api_bases.is_empty() {
+            vec!["https://inv.nadeko.net".to_owned()]
+        } else {
+            api_bases
+        };
+        Self { client, api_bases }
     }
 
     pub fn parse_identifier(identifier: &str) -> Option<YouTubeIdentifier> {
@@ -103,22 +112,44 @@ impl YouTubePlugin {
     }
 
     async fn request_json(&self, path: &str) -> Result<Value, PluginError> {
-        let url = format!("{}{path}", self.api_base);
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|error| PluginError::new("youtube", format!("request failed: {error}")))?
-            .error_for_status()
-            .map_err(|error| {
-                PluginError::new("youtube", format!("API returned an error: {error}"))
-            })?;
-        let body = response.text().await.map_err(|error| {
-            PluginError::new("youtube", format!("cannot read API response: {error}"))
-        })?;
-        serde_json::from_str(&body)
-            .map_err(|error| PluginError::new("youtube", format!("invalid API response: {error}")))
+        let mut failures = Vec::new();
+        for api_base in &self.api_bases {
+            let url = format!("{api_base}{path}");
+            let response = match self.client.get(&url).send().await {
+                Ok(response) => match response.error_for_status() {
+                    Ok(response) => response,
+                    Err(error) => {
+                        failures.push(format!("{api_base}: HTTP request failed: {error}"));
+                        continue;
+                    }
+                },
+                Err(error) => {
+                    failures.push(format!("{api_base}: request failed: {error}"));
+                    continue;
+                }
+            };
+            let body = match response.text().await {
+                Ok(body) => body,
+                Err(error) => {
+                    failures.push(format!("{api_base}: cannot read response: {error}"));
+                    continue;
+                }
+            };
+            match serde_json::from_str(&body) {
+                Ok(data) => return Ok(data),
+                Err(error) => failures.push(format!("{api_base}: invalid JSON response: {error}")),
+            }
+        }
+        if failures.is_empty() {
+            return Err(PluginError::new(
+                "youtube",
+                "no Invidious API base URL is configured",
+            ));
+        }
+        Err(PluginError::new(
+            "youtube",
+            format!("all configured Invidious API instances failed: {}", failures.join("; ")),
+        ))
     }
 
     async fn load_video(&self, video_id: &str) -> Result<Track, PluginError> {
@@ -435,6 +466,21 @@ fn url_encode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_a_comma_separated_invidious_failover_list() {
+        let plugin = YouTubePlugin::new(
+            "https://first.example/, https://second.example, ,https://third.example/",
+        );
+        assert_eq!(
+            plugin.api_bases,
+            vec![
+                "https://first.example",
+                "https://second.example",
+                "https://third.example",
+            ]
+        );
+    }
 
     #[test]
     fn parses_standard_short_and_shorts_urls() {
