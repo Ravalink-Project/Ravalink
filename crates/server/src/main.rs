@@ -1606,6 +1606,7 @@ async fn handle_socket(
             cleanup_session_resources(
                 &state.players,
                 &state.audio_players,
+                &state.playback_sources,
                 &state.voice_tasks,
                 &session_id,
             )
