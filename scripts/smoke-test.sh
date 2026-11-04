@@ -45,7 +45,7 @@ if [[ "$ready" != 1 ]]; then
 fi
 
 version="$(curl --silent --show-error --fail --header "Authorization: $password" "$base/version")"
-[[ "$version" == "4.0.0-ravalink" ]] || { echo "Unexpected /version response: $version" >&2; exit 1; }
+[[ "$version" == "4.0.0" ]] || { echo "Unexpected /version response: $version" >&2; exit 1; }
 
 unauthorized_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/version")"
 [[ "$unauthorized_status" == "401" ]] || { echo "Expected unauthenticated /version to return 401, got $unauthorized_status" >&2; exit 1; }
