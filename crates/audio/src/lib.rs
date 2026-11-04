@@ -127,6 +127,29 @@ pub fn decode_bytes_limited(
     extension: Option<&str>,
     max_pcm_bytes: usize,
 ) -> Result<Vec<PcmFrame>, AudioError> {
+    let mut frames = Vec::new();
+    decode_bytes_with(bytes, extension, max_pcm_bytes, |frame| {
+        frames.push(frame);
+        Ok(())
+    })?;
+    Ok(frames)
+}
+
+/// Decode media incrementally, yielding each decoded packet to a caller.
+///
+/// The PCM budget is cumulative across all emitted frames. Returning an error
+/// from the callback stops demuxing/decoding immediately and drops decoder
+/// state, which lets bounded consumers apply backpressure without retaining
+/// the complete decoded track in memory.
+pub fn decode_bytes_with<F>(
+    bytes: Vec<u8>,
+    extension: Option<&str>,
+    max_pcm_bytes: usize,
+    mut on_frame: F,
+) -> Result<(), AudioError>
+where
+    F: FnMut(PcmFrame) -> Result<(), AudioError>,
+{
     use std::io::{Cursor, ErrorKind};
     use symphonia::core::{
         audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
@@ -155,8 +178,8 @@ pub fn decode_bytes_limited(
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|error| AudioError::invalid(format!("codec initialization failed: {error}")))?;
 
-    let mut frames = Vec::new();
     let mut decoded_bytes = 0_usize;
+    let mut emitted_frames = 0_usize;
     loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
@@ -186,29 +209,33 @@ pub fn decode_bytes_limited(
         let mut samples = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
         samples.copy_interleaved_ref(decoded);
         let pcm = samples.samples().to_vec();
-        if !pcm.is_empty() {
-            decoded_bytes = decoded_bytes
-                .checked_add(pcm.len().saturating_mul(std::mem::size_of::<f32>()))
-                .ok_or_else(|| AudioError::invalid("decoded PCM size overflow"))?;
-            if decoded_bytes > max_pcm_bytes {
-                return Err(AudioError::invalid(
-                    "decoded audio exceeds the configured PCM memory limit",
-                ));
-            }
-            frames.push(PcmFrame {
-                samples: pcm,
-                channels,
-                sample_rate,
-            });
+        if pcm.is_empty() {
+            continue;
         }
+
+        decoded_bytes = decoded_bytes
+            .checked_add(pcm.len().saturating_mul(std::mem::size_of::<f32>()))
+            .ok_or_else(|| AudioError::invalid("decoded PCM size overflow"))?;
+        if decoded_bytes > max_pcm_bytes {
+            return Err(AudioError::invalid(
+                "decoded audio exceeds the configured PCM memory limit",
+            ));
+        }
+
+        on_frame(PcmFrame {
+            samples: pcm,
+            channels,
+            sample_rate,
+        })?;
+        emitted_frames += 1;
     }
 
-    if frames.is_empty() {
+    if emitted_frames == 0 {
         return Err(AudioError::invalid(
             "media decoded successfully but contained no audio frames",
         ));
     }
-    Ok(frames)
+    Ok(())
 }
 
 /// Decode a source into a bounded Tokio channel on a blocking worker.
