@@ -513,7 +513,7 @@ pub fn voice_gateway_url(endpoint: &str) -> Result<String, VoiceGatewayError> {
         || endpoint.chars().any(char::is_whitespace)
         || endpoint
             .chars()
-            .any(|c| matches!(c, '/' | '?' | '#' | '@' | '\\\\' | '\r' | '\n'))
+.any(|c| matches!(c, '/' | '?' | '#' | '@' | '\r' | '\n'))
     {
         return Err(VoiceGatewayError::InvalidPayload(
             "voice gateway endpoint must be a hostname with an optional port".into(),
