@@ -105,7 +105,10 @@ async fn read_json_response(
 
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|error| {
-        PluginError::new("lavasrc", format!("{provider} response read failed: {error}"))
+        PluginError::new(
+            "lavasrc",
+            format!("{provider} response read failed: {error}"),
+        )
     })? {
         append_bounded_response_chunk(&mut body, &chunk, provider)?;
     }
