@@ -582,6 +582,35 @@ mod tests {
         assert_eq!(loaded.data["query"], "ok");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn registry_timeout_cancels_external_plugin_process() {
+        let plugin = ProcessPlugin::new(
+            PluginDescriptor {
+                name: "external-slow".into(),
+                version: "1.0.0".into(),
+                description: "slow process extension".into(),
+                capabilities: vec!["search".into()],
+            },
+            "external-slow:",
+            "/usr/bin/sleep",
+            vec!["5".into()],
+            HashMap::new(),
+        );
+        let mut registry = PluginRegistry::default();
+        registry.register(plugin);
+
+        let started = tokio::time::Instant::now();
+        let error = registry
+            .load_tracks_with_timeout("external-slow:track", Duration::from_millis(50))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.plugin, "external-slow");
+        assert!(error.message.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     #[test]
     fn plugin_directory_discovers_manifests_and_resolves_relative_binaries() {
         use std::{
