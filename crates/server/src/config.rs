@@ -284,11 +284,21 @@ fn validate_plugins(plugins: &[ExternalPluginConfig]) -> Result<(), String> {
                 "external plugin '{name}' program must be an absolute executable path"
             ));
         }
-        if plugin.capabilities.iter().any(|capability| capability.trim().is_empty()) {
+        if plugin
+            .capabilities
+            .iter()
+            .any(|capability| capability.trim().is_empty())
+        {
             return Err(format!("external plugin '{name}' has an empty capability"));
         }
-        if plugin.environment.keys().any(|key| key.is_empty() || key.contains('=')) {
-            return Err(format!("external plugin '{name}' has an invalid environment key"));
+        if plugin
+            .environment
+            .keys()
+            .any(|key| key.is_empty() || key.contains('='))
+        {
+            return Err(format!(
+                "external plugin '{name}' has an invalid environment key"
+            ));
         }
     }
     Ok(())

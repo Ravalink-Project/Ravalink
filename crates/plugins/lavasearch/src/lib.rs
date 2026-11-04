@@ -460,7 +460,12 @@ impl RavaLinkPlugin for LavaSearchPlugin {
             name: "lavasearch".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             description: "Advanced search for tracks, albums, artists and playlists".into(),
-            capabilities: vec!["track-search".into(), "album-search".into(), "artist-search".into(), "playlist-search".into()],
+            capabilities: vec![
+                "track-search".into(),
+                "album-search".into(),
+                "artist-search".into(),
+                "playlist-search".into(),
+            ],
         }
     }
 

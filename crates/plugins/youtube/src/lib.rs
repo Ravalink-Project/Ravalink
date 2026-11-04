@@ -234,7 +234,12 @@ impl RavaLinkPlugin for YouTubePlugin {
             name: "youtube".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             description: "YouTube video, playlist and search source".into(),
-            capabilities: vec!["video".into(), "playlist".into(), "search".into(), "music-search".into()],
+            capabilities: vec![
+                "video".into(),
+                "playlist".into(),
+                "search".into(),
+                "music-search".into(),
+            ],
         }
     }
 

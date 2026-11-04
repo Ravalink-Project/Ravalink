@@ -119,10 +119,7 @@ impl RavaLinkPlugin for ProcessPlugin {
         identifier.starts_with(&self.identifier_prefix)
     }
 
-    async fn load_tracks(
-        &self,
-        identifier: &str,
-    ) -> Result<Option<PluginLoadResult>, PluginError> {
+    async fn load_tracks(&self, identifier: &str) -> Result<Option<PluginLoadResult>, PluginError> {
         let mut child = Command::new(&self.program)
             .args(&self.args)
             .env_clear()
@@ -133,51 +130,69 @@ impl RavaLinkPlugin for ProcessPlugin {
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|error| PluginError::new(
-                self.descriptor.name.clone(),
-                format!("cannot start extension process: {error}"),
-            ))?;
+            .map_err(|error| {
+                PluginError::new(
+                    self.descriptor.name.clone(),
+                    format!("cannot start extension process: {error}"),
+                )
+            })?;
 
         let request = serde_json::json!({
             "protocolVersion": 1,
             "identifier": identifier,
         });
         let mut stdin = child.stdin.take().ok_or_else(|| {
-            PluginError::new(self.descriptor.name.clone(), "extension stdin was unavailable")
-        })?;
-        stdin.write_all(request.to_string().as_bytes()).await.map_err(|error| {
             PluginError::new(
                 self.descriptor.name.clone(),
-                format!("cannot write extension request: {error}"),
+                "extension stdin was unavailable",
             )
         })?;
+        stdin
+            .write_all(request.to_string().as_bytes())
+            .await
+            .map_err(|error| {
+                PluginError::new(
+                    self.descriptor.name.clone(),
+                    format!("cannot write extension request: {error}"),
+                )
+            })?;
         drop(stdin);
 
         let mut stdout = child.stdout.take().ok_or_else(|| {
-            PluginError::new(self.descriptor.name.clone(), "extension stdout was unavailable")
+            PluginError::new(
+                self.descriptor.name.clone(),
+                "extension stdout was unavailable",
+            )
         })?;
         let mut output = Vec::new();
         stdout
             .take((MAX_PROCESS_PLUGIN_OUTPUT_BYTES + 1) as u64)
             .read_to_end(&mut output)
             .await
-            .map_err(|error| PluginError::new(
-                self.descriptor.name.clone(),
-                format!("cannot read extension response: {error}"),
-            ))?;
+            .map_err(|error| {
+                PluginError::new(
+                    self.descriptor.name.clone(),
+                    format!("cannot read extension response: {error}"),
+                )
+            })?;
         if output.len() > MAX_PROCESS_PLUGIN_OUTPUT_BYTES {
             let _ = child.kill().await;
             let _ = child.wait().await;
             return Err(PluginError::new(
                 self.descriptor.name.clone(),
-                format!("extension response exceeds the {} byte limit", MAX_PROCESS_PLUGIN_OUTPUT_BYTES),
+                format!(
+                    "extension response exceeds the {} byte limit",
+                    MAX_PROCESS_PLUGIN_OUTPUT_BYTES
+                ),
             ));
         }
 
-        let status = child.wait().await.map_err(|error| PluginError::new(
-            self.descriptor.name.clone(),
-            format!("cannot wait for extension process: {error}"),
-        ))?;
+        let status = child.wait().await.map_err(|error| {
+            PluginError::new(
+                self.descriptor.name.clone(),
+                format!("cannot wait for extension process: {error}"),
+            )
+        })?;
         if !status.success() {
             return Err(PluginError::new(
                 self.descriptor.name.clone(),

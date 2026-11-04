@@ -959,7 +959,15 @@ impl RavaLinkPlugin for LavaSrcPlugin {
             name: "lavasrc".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             description: "Spotify, Apple Music and Deezer source integration".into(),
-            capabilities: vec!["spotify".into(), "apple-music".into(), "deezer".into(), "track".into(), "album".into(), "artist".into(), "playlist".into()],
+            capabilities: vec![
+                "spotify".into(),
+                "apple-music".into(),
+                "deezer".into(),
+                "track".into(),
+                "album".into(),
+                "artist".into(),
+                "playlist".into(),
+            ],
         }
     }
 
