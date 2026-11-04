@@ -148,7 +148,10 @@ impl YouTubePlugin {
         }
         Err(PluginError::new(
             "youtube",
-            format!("all configured Invidious API instances failed: {}", failures.join("; ")),
+            format!(
+                "all configured Invidious API instances failed: {}",
+                failures.join("; ")
+            ),
         ))
     }
 
