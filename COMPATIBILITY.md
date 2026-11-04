@@ -33,7 +33,7 @@ and failure paths and the same test scenario has been checked against Lavalink v
 
 ## Track codec limitations
 
-The native HTTP source path still buffers a complete direct HTTP(S) file before playback. The codec layer now exposes `decode_bytes_with`, which transfers each decoded packet to a caller-owned sink and enforces a cumulative PCM budget without collecting the whole decoded track. The bounded-channel decoder is now available as a reusable primitive, but the HTTP source adapter and NativePlayer are not yet wired through it. This is not yet end-to-end continuous or live streaming. Large/live source support remains pending.
+The native HTTP source path still buffers a complete direct HTTP(S) file before playback. It no longer retains the complete decoded PCM track during resolution: it validates and measures the file in a blocking worker, discarding each decoded packet. At playback, a second decode pass feeds the bounded NativePlayer channel. This reduces retained PCM memory, but does not provide live network streaming or avoid the initial full-file download. Large/live source support remains pending.
 
 The playback queue is bounded and consumed directly by NativePlayer. Direct HTTP and
 plugin-resolved tracks are cached as compressed source bytes. Resolution performs

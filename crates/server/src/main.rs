@@ -10,7 +10,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use ravalink_audio::{AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager, PcmFrame, decode_bytes_limited, decode_bytes_to_channel};
+use ravalink_audio::{
+    AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager, PcmFrame,
+    decode_bytes_limited, decode_bytes_to_channel,
+};
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_plugin_api::PluginRegistry;
 use ravalink_plugin_lavasearch::LavaSearchPlugin;
@@ -672,23 +675,51 @@ async fn update_player(
         };
         if track.info.position > 0 {
             let decode_source = source;
-            let frames = match tokio::task::spawn_blocking(move || decode_bytes_limited(
-                decode_source.bytes, decode_source.extension.as_deref(), decode_source.max_pcm_bytes
-            )).await {
+            let frames = match tokio::task::spawn_blocking(move || {
+                decode_bytes_limited(
+                    decode_source.bytes,
+                    decode_source.extension.as_deref(),
+                    decode_source.max_pcm_bytes,
+                )
+            })
+            .await
+            {
                 Ok(Ok(frames)) => frames,
-                Ok(Err(error)) => return api_error(StatusCode::BAD_REQUEST, &error.message, &path),
-                Err(error) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("audio decoder task failed: {error}"), &path),
+                Ok(Err(error)) => {
+                    return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+                }
+                Err(error) => {
+                    return api_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!("audio decoder task failed: {error}"),
+                        &path,
+                    );
+                }
             };
-            if let Err(error) = state.audio_players.load_decoded_track(&session_id, &guild_id, audio_track, frames).await {
+            if let Err(error) = state
+                .audio_players
+                .load_decoded_track(&session_id, &guild_id, audio_track, frames)
+                .await
+            {
                 return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
             }
         } else {
             let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
-            if let Err(error) = state.audio_players.load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver).await {
+            if let Err(error) = state
+                .audio_players
+                .load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver)
+                .await
+            {
                 return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
             }
             tokio::spawn(async move {
-                let _ = decode_bytes_to_channel(source.bytes, source.extension, source.max_pcm_bytes, pcm_sender).await;
+                let _ = decode_bytes_to_channel(
+                    source.bytes,
+                    source.extension,
+                    source.max_pcm_bytes,
+                    pcm_sender,
+                )
+                .await;
             });
         }
         if track.info.position > 0

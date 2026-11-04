@@ -157,27 +157,55 @@ impl HttpSourceManager {
             .map(str::to_ascii_lowercase);
         let probe = probe_name(extension.as_deref(), &content_type)
             .ok_or_else(|| AudioError::invalid("unsupported direct HTTP audio format"))?;
-        // Validate and measure the track without retaining decoded PCM packets.
-        let decode_extension = extension.clone();
+        // Reject a source that cannot fit before spending CPU on a duration scan.
+        if body.len() > self.max_cache_bytes {
+            return Err(AudioError::invalid(format!(
+                "compressed HTTP source requires {} cache bytes, exceeding the configured {} byte limit",
+                body.len(), self.max_cache_bytes
+            )));
+        }
+        // Validate and measure off the async executor, discarding each PCM packet.
         let source_bytes = body;
+        let decode_source = source_bytes.clone();
+        let decode_extension = extension.clone();
         let max_pcm_bytes = self.max_cache_bytes;
-        let mut frame_count = 0_u64;
-        let mut sample_rate = None;
-        let mut channels = None;
-        decode_bytes_with(source_bytes.clone(), decode_extension.as_deref(), max_pcm_bytes, |frame| {
-            if frame.sample_rate == 0 || frame.channels == 0 {
-                return Err(AudioError::invalid("HTTP source has an invalid PCM layout"));
-            }
-            match (sample_rate, channels) {
-                (Some(rate), Some(count)) if rate != frame.sample_rate || count != frame.channels => {
-                    return Err(AudioError::invalid("HTTP source changes its PCM layout mid-track"));
-                }
-                _ => { sample_rate = Some(frame.sample_rate); channels = Some(frame.channels); }
-            }
-            frame_count = frame_count.saturating_add((frame.samples.len() / usize::from(frame.channels)) as u64);
-            Ok(())
-        })?;
-        let sample_rate = sample_rate.ok_or_else(|| AudioError::invalid("HTTP source contains no decoded audio"))?;
+        let (frame_count, sample_rate) = tokio::task::spawn_blocking(move || {
+            let mut frame_count = 0_u64;
+            let mut sample_rate = None;
+            let mut channels = None;
+            decode_bytes_with(
+                decode_source,
+                decode_extension.as_deref(),
+                max_pcm_bytes,
+                |frame| {
+                    if frame.sample_rate == 0 || frame.channels == 0 {
+                        return Err(AudioError::invalid("HTTP source has an invalid PCM layout"));
+                    }
+                    match (sample_rate, channels) {
+                        (Some(rate), Some(count))
+                            if rate != frame.sample_rate || count != frame.channels =>
+                        {
+                            return Err(AudioError::invalid(
+                                "HTTP source changes its PCM layout mid-track",
+                            ));
+                        }
+                        _ => {
+                            sample_rate = Some(frame.sample_rate);
+                            channels = Some(frame.channels);
+                        }
+                    }
+                    frame_count = frame_count.saturating_add(
+                        (frame.samples.len() / usize::from(frame.channels)) as u64,
+                    );
+                    Ok(())
+                },
+            )?;
+            let rate = sample_rate
+                .ok_or_else(|| AudioError::invalid("HTTP source contains no decoded audio"))?;
+            Ok::<_, AudioError>((frame_count, rate))
+        })
+        .await
+        .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))??;
         let duration_ms = frame_count.saturating_mul(1_000) / u64::from(sample_rate);
 
         let title = media_title(&url);
@@ -209,15 +237,25 @@ impl HttpSourceManager {
     pub fn take_source(&self, encoded_track: &str) -> Result<Option<CachedHttpSource>, AudioError> {
         let mut cache = self.cache.lock()
             .map_err(|_| AudioError::invalid("HTTP source cache lock is poisoned"))?;
-        let Some(entry) = cache.entries.remove(encoded_track) else { return Ok(None) };
+        let Some(entry) = cache.entries.remove(encoded_track) else {
+            return Ok(None);
+        };
         cache.bytes_used = cache.bytes_used.saturating_sub(entry.bytes);
-        Ok(Some(CachedHttpSource { bytes: entry.source, extension: entry.extension, max_pcm_bytes: entry.max_pcm_bytes }))
+        Ok(Some(CachedHttpSource {
+            bytes: entry.source,
+            extension: entry.extension,
+            max_pcm_bytes: entry.max_pcm_bytes,
+        }))
     }
 
     /// Compatibility helper for callers that explicitly need a seekable decoded buffer.
     pub fn take_frames(&self, encoded_track: &str) -> Result<Option<Vec<PcmFrame>>, AudioError> {
         let Some(source) = self.take_source(encoded_track)? else { return Ok(None) };
-        Ok(Some(decode_bytes_limited(source.bytes, source.extension.as_deref(), source.max_pcm_bytes)?))
+        Ok(Some(decode_bytes_limited(
+            source.bytes,
+            source.extension.as_deref(),
+            source.max_pcm_bytes,
+        )?))
     }
 
     pub fn cached_bytes(&self) -> Result<usize, AudioError> {
@@ -229,7 +267,11 @@ impl HttpSourceManager {
     }
 
     fn insert_cache(
-        &self, key: String, source: Vec<u8>, extension: Option<String>, max_pcm_bytes: usize,
+        &self,
+        key: String,
+        source: Vec<u8>,
+        extension: Option<String>,
+        max_pcm_bytes: usize,
     ) -> Result<(), AudioError> {
         let bytes = source.len();
         if bytes > self.max_cache_bytes {
@@ -244,7 +286,9 @@ impl HttpSourceManager {
             cache.bytes_used = cache.bytes_used.saturating_sub(previous.bytes);
         }
         while cache.bytes_used.saturating_add(bytes) > self.max_cache_bytes {
-            let oldest = cache.entries.iter().min_by_key(|(_, entry)| entry.sequence).map(|(key, _)| key.clone());
+            let oldest = cache.entries.iter()
+                .min_by_key(|(_, entry)| entry.sequence)
+                .map(|(key, _)| key.clone());
             let Some(oldest) = oldest else { break };
             if let Some(evicted) = cache.entries.remove(&oldest) {
                 cache.bytes_used = cache.bytes_used.saturating_sub(evicted.bytes);
@@ -252,7 +296,10 @@ impl HttpSourceManager {
         }
         cache.sequence = cache.sequence.wrapping_add(1);
         let sequence = cache.sequence;
-        cache.entries.insert(key, CacheEntry { source, extension, max_pcm_bytes, bytes, sequence });
+        cache.entries.insert(
+            key,
+            CacheEntry { source, extension, max_pcm_bytes, bytes, sequence },
+        );
         cache.bytes_used = cache.bytes_used.saturating_add(bytes);
         Ok(())
     }
@@ -326,8 +373,12 @@ mod tests {
     #[test]
     fn compressed_source_cache_evicts_oldest_entries_to_respect_its_limit() {
         let manager = HttpSourceManager::new(16);
-        manager.insert_cache("first".into(), vec![1; 8], Some("mp3".into()), 64).unwrap();
-        manager.insert_cache("second".into(), vec![2; 12], Some("mp3".into()), 64).unwrap();
+        manager
+            .insert_cache("first".into(), vec![1; 8], Some("mp3".into()), 64)
+            .unwrap();
+        manager
+            .insert_cache("second".into(), vec![2; 12], Some("mp3".into()), 64)
+            .unwrap();
 
         assert_eq!(manager.cached_bytes().unwrap(), 12);
         assert!(manager.take_source("first").unwrap().is_none());
@@ -338,8 +389,12 @@ mod tests {
     #[test]
     fn rejects_entries_larger_than_the_entire_cache_without_evicting_or_caching_them() {
         let manager = HttpSourceManager::new(16);
-        manager.insert_cache("kept".into(), vec![1; 8], Some("mp3".into()), 64).unwrap();
-        let error = manager.insert_cache("oversized".into(), vec![2; 17], Some("mp3".into()), 64).unwrap_err();
+        manager
+            .insert_cache("kept".into(), vec![1; 8], Some("mp3".into()), 64)
+            .unwrap();
+        let error = manager
+            .insert_cache("oversized".into(), vec![2; 17], Some("mp3".into()), 64)
+            .unwrap_err();
 
         assert!(error.message.contains("exceeding the configured 16 byte limit"));
         assert_eq!(manager.cached_bytes().unwrap(), 8);
@@ -351,7 +406,9 @@ mod tests {
     #[test]
     fn taking_a_compressed_source_removes_the_cache_entry() {
         let manager = HttpSourceManager::new(64);
-        manager.insert_cache("track".into(), vec![1; 8], Some("mp3".into()), 64).unwrap();
+        manager
+            .insert_cache("track".into(), vec![1; 8], Some("mp3".into()), 64)
+            .unwrap();
         assert!(manager.take_source("track").unwrap().is_some());
         assert!(manager.take_source("track").unwrap().is_none());
         assert_eq!(manager.cached_bytes().unwrap(), 0);
