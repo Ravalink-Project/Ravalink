@@ -1761,6 +1761,13 @@ mod server_api_tests {
         assert_eq!(ended["type"], "TrackEndEvent");
         assert_eq!(ended["track"]["encoded"], encoded);
         assert_eq!(ended["reason"], "finished");
+
+        publish_track_stuck(&state, "session", "guild", encoded.clone(), 10_000);
+        let (_, stuck) = receiver.try_recv().unwrap();
+        let stuck = serde_json::to_value(stuck).unwrap();
+        assert_eq!(stuck["type"], "TrackStuckEvent");
+        assert_eq!(stuck["track"]["encoded"], encoded);
+        assert_eq!(stuck["thresholdMs"], 10_000);
     }
 
     #[tokio::test]
