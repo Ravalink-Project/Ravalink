@@ -83,10 +83,12 @@ impl HttpSourceManager {
             .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
         self.validate_url(&url).await?;
         let client = self.streaming_client(&url).await?;
-        let response = client
-            .head(url.clone())
-            .send()
+        let response = tokio::time::timeout(
+            Duration::from_secs(15),
+            client.head(url.clone()).send(),
+        )
             .await
+            .map_err(|_| AudioError::invalid("HTTP source metadata request timed out"))?
             .map_err(|error| AudioError::invalid(format!("HTTP source metadata request failed: {error}")))?
             .error_for_status()
             .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
@@ -170,10 +172,19 @@ impl HttpSourceManager {
         let producer = tokio::spawn(async move {
             let _permit = permit;
             loop {
-                let chunk = tokio::time::timeout(Duration::from_secs(60), response.chunk())
-                    .await
-                    .map_err(|_| AudioError::invalid("HTTP media stream stalled for 60 seconds"))?
-                    .map_err(|error| AudioError::invalid(format!("HTTP media stream failed: {error}")))?;
+                let chunk = match tokio::time::timeout(Duration::from_secs(60), response.chunk()).await {
+                    Err(_) => {
+                        let message = "HTTP media stream stalled for 60 seconds".to_owned();
+                        let _ = compressed_sender.send(Err(message.clone())).await;
+                        return Err(AudioError::invalid(message));
+                    }
+                    Ok(Err(error)) => {
+                        let message = format!("HTTP media stream failed: {error}");
+                        let _ = compressed_sender.send(Err(message.clone())).await;
+                        return Err(AudioError::invalid(message));
+                    }
+                    Ok(Ok(chunk)) => chunk,
+                };
                 let Some(chunk) = chunk else {
                     return Ok::<(), AudioError>(());
                 };
@@ -185,7 +196,16 @@ impl HttpSourceManager {
 
         let decoded = crate::decode_stream_to_channel(
             compressed_receiver,
-            Some(probe.to_ascii_lowercase()),
+            Some(match probe {
+                "MPEG" => "mp3",
+                "WAV" => "wav",
+                "FLAC" => "flac",
+                "OGG" => "ogg",
+                "ADTS" => "aac",
+                "MP4" => "m4a",
+                "MATROSKA" => "webm",
+                _ => unreachable!("probe_name returns a known decoder format"),
+            }.to_owned()),
             max_pcm_bytes,
             sender,
         )
