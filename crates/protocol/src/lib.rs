@@ -120,6 +120,7 @@ pub struct CpuStats {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeStats {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frame_stats: Option<FrameStats>,
     pub players: usize,
     pub playing_players: usize,
@@ -197,6 +198,31 @@ mod tests {
                 .unwrap()
                 .contains(&serde_json::json!("timescale"))
         );
+    }
+
+    #[test]
+    fn stats_omit_frame_stats_when_unavailable_like_lavalink_v4() {
+        let stats = NodeStats {
+            frame_stats: None,
+            players: 0,
+            playing_players: 0,
+            uptime: 1,
+            memory: MemoryStats {
+                free: 1,
+                used: 0,
+                allocated: 1,
+                reservable: 1,
+            },
+            cpu: CpuStats {
+                cores: 1,
+                system_load: 0.0,
+                lavalink_load: 0.0,
+            },
+        };
+        let value = serde_json::to_value(stats).unwrap();
+        assert!(value.get("frameStats").is_none());
+        assert_eq!(value["players"], 0);
+        assert_eq!(value["playingPlayers"], 0);
     }
 
     #[test]
