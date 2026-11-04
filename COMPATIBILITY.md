@@ -49,6 +49,12 @@ Subsequent seeking is unavailable because the source is non-seekable. The legacy
 buffered decode helper remains available internally for compatibility tests and
 specialized callers, but it is no longer the REST player's default path.
 
+The progressive HTTP admission policy limits metadata probes to two concurrent
+requests (each waiting at most five seconds) and active media streams to 128.
+The compressed bridge has four queue slots; each queued chunk is split to at
+most 64 KiB before enqueueing. This bounds queued compressed data independently
+of track duration, while the decoder's PCM queue applies downstream backpressure.
+
 The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are
 known to contain no extra data, plus the HTTP/local probing descriptor. Plugin

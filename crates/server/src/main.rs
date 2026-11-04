@@ -174,6 +174,12 @@ struct PlayerUpdateQuery {
     no_replace: bool,
 }
 
+fn has_http_scheme(identifier: &str) -> bool {
+    identifier
+        .split_once(':')
+        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+}
+
 type PlayerFieldValidator = (&'static str, fn(&serde_json::Value) -> bool);
 
 fn invalid_player_field(
@@ -531,7 +537,7 @@ async fn load_tracks(
         Ok(None) => {}
     }
 
-    if !query.identifier.starts_with("http://") && !query.identifier.starts_with("https://") {
+    if !has_http_scheme(&query.identifier) {
         return Json(LoadResult::empty()).into_response();
     }
 
@@ -1855,6 +1861,27 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[test]
+    fn http_source_scheme_detection_is_case_insensitive_and_exact() {
+        for identifier in [
+            "http://cdn.example/audio.mp3",
+            "https://cdn.example/audio.mp3",
+            "HTTP://cdn.example/audio.mp3",
+            "HtTpS://cdn.example/audio.mp3",
+        ] {
+            assert!(has_http_scheme(identifier), "expected HTTP scheme: {identifier}");
+        }
+        for identifier in [
+            "ftp://cdn.example/audio.mp3",
+            "httpx://cdn.example/audio.mp3",
+            "httpsomething://cdn.example/audio.mp3",
+            "youtube:track-id",
+            "not a URL",
+        ] {
+            assert!(!has_http_scheme(identifier), "unexpected HTTP scheme: {identifier}");
+        }
     }
 
     #[tokio::test]
