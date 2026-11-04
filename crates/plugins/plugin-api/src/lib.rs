@@ -6,7 +6,10 @@
 use async_trait::async_trait;
 use ravalink_protocol::PluginInfo;
 use serde_json::Value;
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Duration};
+
+/// Maximum default wall-clock time allowed for one plugin resolution.
+pub const DEFAULT_PLUGIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginLoadType {
@@ -110,16 +113,43 @@ impl PluginRegistry {
             .cloned()
     }
 
+    /// Resolve an identifier while bounding each plugin's execution time.
+    ///
+    /// A plugin timeout is isolated to that plugin call: the timed-out future is
+    /// cancelled and the caller receives a structured error rather than waiting
+    /// indefinitely on a third-party source manager.
     pub async fn load_tracks(
         &self,
         identifier: &str,
+    ) -> Result<Option<PluginLoadResult>, PluginError> {
+        self.load_tracks_with_timeout(identifier, DEFAULT_PLUGIN_TIMEOUT)
+            .await
+    }
+
+    /// Resolve an identifier with an explicit per-plugin wall-clock timeout.
+    pub async fn load_tracks_with_timeout(
+        &self,
+        identifier: &str,
+        timeout: Duration,
     ) -> Result<Option<PluginLoadResult>, PluginError> {
         for plugin in &self.plugins {
             if !plugin.supports_identifier(identifier) {
                 continue;
             }
-            if let Some(result) = plugin.load_tracks(identifier).await? {
-                return Ok(Some(result));
+            let descriptor = plugin.descriptor();
+            let result = tokio::time::timeout(timeout, plugin.load_tracks(identifier))
+                .await
+                .map_err(|_| {
+                    PluginError::new(
+                        descriptor.name,
+                        format!(
+                            "track resolution timed out after {} ms",
+                            timeout.as_millis()
+                        ),
+                    )
+                })??;
+            if result.is_some() {
+                return Ok(result);
             }
         }
         Ok(None)
@@ -187,6 +217,46 @@ mod tests {
                 serde_json::json!({"query": identifier}),
             )))
         }
+    }
+
+    struct SlowPlugin;
+
+    #[async_trait]
+    impl RavaLinkPlugin for SlowPlugin {
+        fn descriptor(&self) -> PluginDescriptor {
+            PluginDescriptor {
+                name: "slow",
+                version: "0.1.0",
+                description: "deliberately slow test plugin",
+                capabilities: &["search"],
+            }
+        }
+
+        fn supports_identifier(&self, identifier: &str) -> bool {
+            identifier.starts_with("slow:")
+        }
+
+        async fn load_tracks(
+            &self,
+            _identifier: &str,
+        ) -> Result<Option<PluginLoadResult>, PluginError> {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_cancels_plugin_resolution_after_its_timeout() {
+        let mut registry = PluginRegistry::default();
+        registry.register(SlowPlugin);
+
+        let error = registry
+            .load_tracks_with_timeout("slow:track", Duration::from_millis(1))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.plugin, "slow");
+        assert!(error.message.contains("timed out"));
     }
 
     #[tokio::test]
