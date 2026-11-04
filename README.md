@@ -82,7 +82,7 @@ The default Compose port binding is localhost-only. See [Docker deployment](docs
 
 1. Finish the remaining Lavalink v4 REST/WebSocket edge cases and verify them against upstream acceptance scenarios.
 2. Replace whole-file buffering with a segmented, back-pressured streaming demux/decode pipeline.
-3. Improve source reliability and YouTube extraction beyond a single Invidious-compatible service.
+3. Validate configured Invidious failover under provider outages and rate limits, then expand to provider-independent YouTube extraction.
 4. Design stable external Rust plugin distribution/loading without exposing an unsafe Rust ABI.
 5. Expand end-to-end Discord voice, compatibility and performance testing on real nodes and multiple client libraries.
 

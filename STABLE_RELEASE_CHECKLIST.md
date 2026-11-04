@@ -39,8 +39,8 @@ unverified implementation rows.
       volume, every advertised filter and source replacement are tested.
 - [ ] Decoder failures, truncated downloads, HTTP status errors, cache pressure
       and consumer cancellation produce the expected Lavalink events.
-- [ ] Concurrent players stay within configured download, source-cache,
-      seek-cache and PCM limits.
+- [ ] Concurrent players respect download/source/seek-cache limits, the
+      two-request resolver cap and the per-packet PCM allocation ceiling.
 
 ## Security and release artifacts
 
