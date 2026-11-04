@@ -739,17 +739,15 @@ async fn update_player(
         .get("encodedTrack")
         .is_some_and(|value| !value.is_null())
         || nested_encoded_track.is_some_and(|value| !value.is_null());
-    let has_track_object = nested_track.is_some()
-        && !nested_encoded_track.is_some_and(serde_json::Value::is_null);
+    let has_track_object =
+        nested_track.is_some() && !nested_encoded_track.is_some_and(serde_json::Value::is_null);
     let has_track_request = has_identifier || has_encoded_track || has_track_object;
     let encoded_track_is_null = fields
         .get("encodedTrack")
         .is_some_and(serde_json::Value::is_null)
         || nested_encoded_track.is_some_and(serde_json::Value::is_null);
-    let track_request_is_null = fields
-        .get("track")
-        .is_some_and(serde_json::Value::is_null)
-        || encoded_track_is_null;
+    let track_request_is_null =
+        fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null;
     if fields.contains_key("track")
         && (fields.contains_key("identifier") || fields.contains_key("encodedTrack"))
     {
@@ -919,9 +917,7 @@ async fn update_player(
             "track".to_owned(),
             serde_json::to_value(track).expect("Track serializes to JSON"),
         );
-    } else if !no_replace_active
-        && track_request_is_null
-    {
+    } else if !no_replace_active && track_request_is_null {
         if let Some(previous) = previous_encoded_track.as_ref() {
             publish_track_end(
                 &state,
@@ -1692,7 +1688,10 @@ async fn websocket(
     let client_name = match client_name_header(&headers) {
         Some(value) => Some(value),
         None => {
-            return (StatusCode::BAD_REQUEST, "Missing or invalid Client-Name header")
+            return (
+                StatusCode::BAD_REQUEST,
+                "Missing or invalid Client-Name header",
+            )
                 .into_response();
         }
     };
