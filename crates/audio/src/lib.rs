@@ -174,7 +174,26 @@ where
     if let Some(extension) = extension {
         hint.with_extension(extension);
     }
-    let source = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+    let source = Box::new(Cursor::new(bytes)) as Box<dyn symphonia::core::io::MediaSource>;
+    decode_media_source_with(source, extension, max_pcm_bytes, on_frame)
+}
+
+/// Decode from a seekable or non-seekable Symphonia media source.
+fn decode_media_source_with<F>(
+    source: Box<dyn symphonia::core::io::MediaSource>,
+    extension: Option<&str>,
+    max_pcm_bytes: usize,
+    mut on_frame: F,
+) -> Result<(), AudioError>
+where
+    F: FnMut(PcmFrame) -> Result<(), AudioError>,
+{
+    use std::io::ErrorKind;
+    use symphonia::core::{
+        audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
+        formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint,
+    };
+    let source = MediaSourceStream::new(source, Default::default());
     let probed = symphonia::default::get_probe()
         .format(
             &hint,
@@ -316,6 +335,101 @@ pub async fn decode_bytes_to_channel_at(
     })
     .await
     .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))?
+}
+
+
+/// A blocking, non-seekable reader fed by an asynchronous HTTP producer.
+/// The Tokio channel is bounded, so network buffering is independent of track size.
+struct StreamingMediaSource {
+    receiver: std::sync::Mutex<tokio::sync::mpsc::Receiver<Result<Vec<u8>, String>>>,
+    current: Vec<u8>,
+    offset: usize,
+}
+
+impl StreamingMediaSource {
+    fn new(receiver: tokio::sync::mpsc::Receiver<Result<Vec<u8>, String>>) -> Self {
+        Self {
+            receiver: std::sync::Mutex::new(receiver),
+            current: Vec::new(),
+            offset: 0,
+        }
+    }
+}
+
+impl std::io::Read for StreamingMediaSource {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if output.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.offset < self.current.len() {
+                let count = output.len().min(self.current.len() - self.offset);
+                output[..count].copy_from_slice(&self.current[self.offset..self.offset + count]);
+                self.offset += count;
+                return Ok(count);
+            }
+            let next = self
+                .receiver
+                .lock()
+                .map_err(|_| std::io::Error::other("HTTP stream receiver lock poisoned"))?
+                .blocking_recv();
+            match next {
+                Some(Ok(chunk)) => {
+                    self.current = chunk;
+                    self.offset = 0;
+                }
+                Some(Err(message)) => return Err(std::io::Error::other(message)),
+                None => return Ok(0),
+            }
+        }
+    }
+}
+
+impl std::io::Seek for StreamingMediaSource {
+    fn seek(&mut self, _position: std::io::SeekFrom) -> std::io::Result<u64> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "live HTTP media streams are not seekable",
+        ))
+    }
+}
+
+impl symphonia::core::io::MediaSource for StreamingMediaSource {
+    fn is_seekable(&self) -> bool {
+        false
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Decode a live HTTP byte stream into a bounded PCM channel.
+pub async fn decode_stream_to_channel(
+    receiver: tokio::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
+    extension: Option<String>,
+    max_pcm_bytes: usize,
+    sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
+) -> Result<(), AudioError> {
+    tokio::task::spawn_blocking(move || {
+        let source = Box::new(StreamingMediaSource::new(receiver))
+            as Box<dyn symphonia::core::io::MediaSource>;
+        let decoded = decode_media_source_with(source, extension.as_deref(), max_pcm_bytes, |frame| {
+            sender
+                .blocking_send(Ok(frame))
+                .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))
+        });
+        if let Err(error) = decoded {
+            let _ = sender.blocking_send(Err(AudioError::invalid(format!(
+                "audio decode failed: {}",
+                error.message
+            ))));
+            return Err(error);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| AudioError::invalid(format!("HTTP stream decoder task failed: {error}")))?
 }
 
 /// Stateful DSP chain for Lavalink's built-in PCM filters.
