@@ -1708,6 +1708,7 @@ async fn handle_socket(
         cleanup_session_resources(
             &state.players,
             &state.audio_players,
+            &state.playback_sources,
             &state.voice_tasks,
             &session_id,
         )
@@ -1853,6 +1854,19 @@ mod server_api_tests {
             .players
             .update("session", "guild", serde_json::json!({}))
             .await;
+        assert!(
+            state
+                .playback_sources
+                .insert(
+                    ("session".into(), "guild".into()),
+                    CachedHttpSource {
+                        bytes: vec![1, 2, 3],
+                        extension: Some("wav".into()),
+                        max_pcm_bytes: 64,
+                    },
+                )
+                .await
+        );
         state
             .audio_players
             .set_voice_state(
@@ -1870,6 +1884,7 @@ mod server_api_tests {
         cleanup_session_resources(
             &state.players,
             &state.audio_players,
+            &state.playback_sources,
             &state.voice_tasks,
             "session",
         )
@@ -1879,6 +1894,7 @@ mod server_api_tests {
         assert!(*receiver.borrow());
         assert!(state.players.is_empty().await);
         assert!(state.audio_players.is_empty().await);
+        assert_eq!(state.playback_sources.bytes_used().await, 0);
         assert!(
             state
                 .audio_players
