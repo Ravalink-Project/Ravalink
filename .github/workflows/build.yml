@@ -18,7 +18,12 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -28,10 +33,19 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace --all-targets
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  release-smoke:
+    name: Linux release and API smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build release executable
         run: cargo build --release -p ravalink-server
       - name: API smoke test
         run: bash scripts/smoke-test.sh target/release/ravalink
+
   cross-compile:
     name: Linux ARM64 cross-compile
     runs-on: ubuntu-latest
@@ -42,6 +56,7 @@ jobs:
         with:
           target: aarch64-unknown-linux-gnu
           args: "--release -p ravalink-server"
+
   docker:
     runs-on: ubuntu-latest
     steps:
