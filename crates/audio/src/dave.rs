@@ -140,6 +140,11 @@ impl DaveVoiceSession {
         transition_id: u16,
         protocol_version: u16,
     ) -> Result<(), DaveVoiceError> {
+        if protocol_version > DAVE_PROTOCOL_VERSION {
+            return Err(DaveVoiceError::invalid(format!(
+                "DAVE protocol version {protocol_version} is newer than supported version {DAVE_PROTOCOL_VERSION}"
+            )));
+        }
         self.protocol_version = protocol_version;
         self.session
             .prepare_transition(transition_id, protocol_version)
@@ -159,6 +164,11 @@ impl DaveVoiceSession {
         epoch: u64,
         protocol_version: u16,
     ) -> Result<Option<Vec<u8>>, DaveVoiceError> {
+        if protocol_version > DAVE_PROTOCOL_VERSION {
+            return Err(DaveVoiceError::invalid(format!(
+                "DAVE protocol version {protocol_version} is newer than supported version {DAVE_PROTOCOL_VERSION}"
+            )));
+        }
         self.protocol_version = protocol_version;
         if epoch != 1 || protocol_version == 0 {
             return Ok(None);
@@ -402,6 +412,17 @@ mod tests {
         assert_eq!(session.protocol_version(), DAVE_PROTOCOL_VERSION);
         assert!(!session.is_ready());
         assert!(!session.passthrough());
+    }
+
+    #[test]
+    fn rejects_newer_protocol_versions_without_mutating_the_session() {
+        let mut session = DaveVoiceSession::new(1234, 5678).unwrap();
+        let unsupported = DAVE_PROTOCOL_VERSION.saturating_add(1);
+
+        assert!(session.prepare_transition(7, unsupported).is_err());
+        assert_eq!(session.protocol_version(), DAVE_PROTOCOL_VERSION);
+        assert!(session.prepare_epoch(1, unsupported).is_err());
+        assert_eq!(session.protocol_version(), DAVE_PROTOCOL_VERSION);
     }
 
     #[test]
