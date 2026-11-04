@@ -690,10 +690,7 @@ mod tests {
             permits.push(manager.resolve_slots.clone().acquire_owned().await.unwrap());
         }
 
-        let error = manager
-            .resolve_stream_track("not a URL")
-            .await
-            .unwrap_err();
+        let error = manager.resolve_stream_track("not a URL").await.unwrap_err();
         assert!(error.message.contains("resolver is at capacity"));
         drop(permits);
     }
