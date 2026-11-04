@@ -390,6 +390,15 @@ impl PluginRegistry {
             }) {
                 return Err(PluginError::new(name, "plugin name is already registered"));
             }
+            let prefix_probe = format!("{prefix}ravalink-plugin-prefix-probe");
+            if self.plugins.iter().any(|plugin| {
+                plugin.supports_identifier(prefix) || plugin.supports_identifier(&prefix_probe)
+            }) {
+                return Err(PluginError::new(
+                    name,
+                    "plugin identifier prefix conflicts with an already registered source",
+                ));
+            }
             let program = if manifest.program.is_absolute() {
                 manifest.program.clone()
             } else {

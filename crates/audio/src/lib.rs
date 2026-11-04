@@ -1664,6 +1664,24 @@ mod streamed_queue_tests {
     use super::*;
 
     #[tokio::test]
+    async fn progressive_media_reader_consumes_chunks_without_buffering_the_track() {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let reader = StreamingMediaSource::new(receiver);
+        let worker = tokio::task::spawn_blocking(move || {
+            let mut reader = reader;
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut reader, &mut bytes).unwrap();
+            bytes
+        });
+
+        sender.send(Ok(vec![1, 2, 3])).await.unwrap();
+        sender.send(Ok(vec![4, 5])).await.unwrap();
+        drop(sender);
+
+        assert_eq!(worker.await.unwrap(), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[tokio::test]
     async fn native_player_consumes_bounded_stream_and_completes_on_channel_close() {
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let mut player = NativePlayer::default();
