@@ -439,7 +439,7 @@ impl LavaSrcPlugin {
                 "Spotify collection playback requires RAVALINK_SPOTIFY_CLIENT_ID and RAVALINK_SPOTIFY_CLIENT_SECRET",
             )
         })?;
-        let response: Value = self
+        let response = self
             .client
             .post("https://accounts.spotify.com/api/token")
             .basic_auth(client_id, Some(client_secret))
@@ -453,14 +453,8 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Spotify authentication failed: {error}"))
             })?
-            .json()
-            .await
-            .map_err(|error| {
-                PluginError::new(
-                    "lavasrc",
-                    format!("invalid Spotify token response: {error}"),
-                )
-            })?;
+            ;
+        let response = read_json_response(response, "Spotify").await?;
         let token = response
             .get("access_token")
             .and_then(Value::as_str)
@@ -513,7 +507,7 @@ impl LavaSrcPlugin {
                 ));
             }
         };
-        let data: Value = self
+        let response = self
             .client
             .get(endpoint)
             .bearer_auth(token)
@@ -529,14 +523,8 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Spotify returned an error: {error}"))
             })?
-            .json()
-            .await
-            .map_err(|error| {
-                PluginError::new(
-                    "lavasrc",
-                    format!("invalid Spotify collection response: {error}"),
-                )
-            })?;
+            ;
+        let bounded_response = read_json_response(response, "Spotify").await?;
         let items = data
             .pointer(tracks_path)
             .and_then(Value::as_array)
@@ -617,7 +605,7 @@ impl LavaSrcPlugin {
                 "Apple Music playlist resolution requires RAVALINK_APPLE_MUSIC_TOKEN",
             )
         })?;
-        let data: Value = self
+        let response = self
             .client
             .get(format!(
                 "https://api.music.apple.com/v1/catalog/us/playlists/{}",
@@ -637,14 +625,8 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
             })?
-            .json()
-            .await
-            .map_err(|error| {
-                PluginError::new(
-                    "lavasrc",
-                    format!("invalid Apple Music playlist response: {error}"),
-                )
-            })?;
+            ;
+        let data = read_json_response(response, "Apple Music").await?;
         let playlist = data
             .pointer("/data/0")
             .ok_or_else(|| PluginError::new("lavasrc", "Apple Music playlist was not found"))?;
@@ -729,7 +711,7 @@ impl LavaSrcPlugin {
         if parsed.content_type == "playlist" {
             return self.apple_music_playlist(parsed).await;
         }
-        let data: Value = self
+        let response = self
             .client
             .get("https://itunes.apple.com/lookup")
             .query(&[
@@ -749,14 +731,8 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
             })?
-            .json()
-            .await
-            .map_err(|error| {
-                PluginError::new(
-                    "lavasrc",
-                    format!("invalid Apple Music collection response: {error}"),
-                )
-            })?;
+            ;
+        let bounded_response = read_json_response(response, "Apple Music").await?;
         let items = data
             .get("results")
             .and_then(Value::as_array)
@@ -837,7 +813,7 @@ impl LavaSrcPlugin {
                 ));
             }
         };
-        let data: Value = self
+        let response = self
             .client
             .get(endpoint)
             .send()
@@ -852,14 +828,8 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Deezer returned an error: {error}"))
             })?
-            .json()
-            .await
-            .map_err(|error| {
-                PluginError::new(
-                    "lavasrc",
-                    format!("invalid Deezer collection response: {error}"),
-                )
-            })?;
+            ;
+        let data = read_json_response(response, "Deezer").await?;
         if data.get("error").is_some() {
             return Err(PluginError::new(
                 "lavasrc",
