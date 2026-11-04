@@ -11,6 +11,8 @@ use ravalink_plugin_api::{
 use ravalink_plugin_youtube::YouTubePlugin;
 use ravalink_protocol::{Track, encode_track};
 use serde_json::{Value, json};
+const MAX_PROVIDER_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
 use std::{
     collections::HashSet,
     env,
@@ -70,6 +72,38 @@ impl Default for LavaSrcPlugin {
             spotify_token: Arc::new(Mutex::new(None)),
         }
     }
+}
+
+async fn read_json_response(
+    mut response: reqwest::Response,
+    provider: &str,
+) -> Result<Value, PluginError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_PROVIDER_RESPONSE_BYTES as u64)
+    {
+        return Err(PluginError::new(
+            "lavasrc",
+            format!("{provider} response exceeds the 8 MiB limit"),
+        ));
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        PluginError::new("lavasrc", format!("{provider} response read failed: {error}"))
+    })? {
+        if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
+            return Err(PluginError::new(
+                "lavasrc",
+                format!("{provider} response exceeds the 8 MiB limit"),
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    serde_json::from_slice(&body).map_err(|error| {
+        PluginError::new("lavasrc", format!("invalid {provider} response: {error}"))
+    })
 }
 
 impl LavaSrcPlugin {
@@ -169,7 +203,7 @@ impl LavaSrcPlugin {
                 .await;
             if let Ok(response) = response
                 && let Ok(response) = response.error_for_status()
-                && let Ok(data) = response.json::<Value>().await
+                && let Ok(data) = read_json_response(response, "Spotify").await
             {
                 let artists = data
                     .get("artists")
@@ -222,9 +256,7 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Spotify returned an error: {error}"))
             })?;
-        let data: Value = response.json().await.map_err(|error| {
-            PluginError::new("lavasrc", format!("invalid Spotify response: {error}"))
-        })?;
+        let data = read_json_response(response, "Spotify").await?;
         Ok(ExternalTrack {
             title: data
                 .get("title")
@@ -259,9 +291,7 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Apple Music returned an error: {error}"))
             })?;
-        let data: Value = response.json().await.map_err(|error| {
-            PluginError::new("lavasrc", format!("invalid Apple Music response: {error}"))
-        })?;
+        let data = read_json_response(response, "Apple Music").await?;
         let item = data
             .get("results")
             .and_then(Value::as_array)
@@ -304,9 +334,7 @@ impl LavaSrcPlugin {
             .map_err(|error| {
                 PluginError::new("lavasrc", format!("Deezer returned an error: {error}"))
             })?;
-        let data: Value = response.json().await.map_err(|error| {
-            PluginError::new("lavasrc", format!("invalid Deezer response: {error}"))
-        })?;
+        let data = read_json_response(response, "Deezer").await?;
         if data.get("error").is_some() {
             return Err(PluginError::new(
                 "lavasrc",
