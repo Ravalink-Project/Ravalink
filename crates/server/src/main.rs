@@ -1008,16 +1008,16 @@ async fn run_voice_audio_loop(
                     if let Some(player) = snapshot.as_ref() {
                         if last_position_ms == Some(player.position_ms) {
                             let stalled = stalled_since.get_or_insert_with(Instant::now);
-                            if !stuck_reported && stalled.elapsed() >= Duration::from_secs(10) {
-                                if let Some(encoded) = state
+                            if !stuck_reported
+                                && stalled.elapsed() >= Duration::from_secs(10)
+                                && let Some(encoded) = state
                                     .players
                                     .get(session_id, guild_id)
                                     .await
                                     .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned))
-                                {
-                                    publish_track_stuck(state, session_id, guild_id, encoded, 10_000);
-                                    stuck_reported = true;
-                                }
+                            {
+                                publish_track_stuck(state, session_id, guild_id, encoded, 10_000);
+                                stuck_reported = true;
                             }
                         } else {
                             last_position_ms = Some(player.position_ms);
