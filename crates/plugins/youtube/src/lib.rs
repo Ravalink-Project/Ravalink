@@ -40,8 +40,8 @@ impl YouTubePlugin {
             .user_agent("RavaLink/0.1 (native YouTube source)")
             .build()
             .expect("valid default HTTP client");
+        let api_base = api_base.into();
         let api_bases = api_base
-            .into()
             .split(',')
             .map(str::trim)
             .filter(|base| !base.is_empty())
@@ -475,9 +475,9 @@ mod tests {
         assert_eq!(
             plugin.api_bases,
             vec![
-                "https://first.example",
-                "https://second.example",
-                "https://third.example",
+                "https://first.example".to_owned(),
+                "https://second.example".to_owned(),
+                "https://third.example".to_owned(),
             ]
         );
     }
