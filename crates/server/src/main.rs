@@ -1507,14 +1507,7 @@ async fn resolve_player_track(
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(Track, String), String> {
     let nested_track = fields.get("track").filter(|track| track.is_object());
-    let identifier = fields
-        .get("identifier")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            nested_track
-                .and_then(|track| track.get("identifier"))
-                .and_then(serde_json::Value::as_str)
-        });
+    let identifier = requested_track_identifier(fields);
     if let Some(identifier) = identifier {
         let (mut track, stream_url) = if state.plugins.find(identifier).is_some() {
             resolve_plugin_audio_track(state, identifier).await?
