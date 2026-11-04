@@ -1792,7 +1792,7 @@ mod server_api_tests {
     async fn playback_source_store_enforces_aggregate_memory_limit() {
         let store = PlaybackSourceStore::new(16);
         let source = |size: usize| CachedHttpSource {
-            bytes: vec![0; size],
+            bytes: vec![0; size].into(),
             extension: Some("wav".into()),
             max_pcm_bytes: 64,
         };
