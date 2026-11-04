@@ -174,10 +174,7 @@ where
     if let Some(extension) = extension {
         hint.with_extension(extension);
     }
-    let source = MediaSourceStream::new(
-        Box::new(Cursor::new(bytes)),
-        Default::default(),
-    );
+    let source = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
     let probed = symphonia::default::get_probe()
         .format(
             &hint,
