@@ -352,7 +352,9 @@ async fn run_voice_gateway_socket(
                             Ok(commands) => send_dave_commands(&mut socket, commands).await,
                             Err(error) => {
                                 tracing::warn!(%error, opcode, "DAVE JSON event was rejected; restarting voice session");
-                                Err(AudioError::invalid(format!("DAVE JSON event {opcode} failed: {error}")))
+                                Err(AudioError::invalid(format!(
+                                    "DAVE JSON event {opcode} failed: {error}"
+                                )))
                             }
                         }
                     }

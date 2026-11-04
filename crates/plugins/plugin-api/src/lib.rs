@@ -138,9 +138,7 @@ impl RavaLinkPlugin for ProcessPlugin {
         if identifier.len() > MAX_PLUGIN_IDENTIFIER_BYTES {
             return Err(PluginError::new(
                 self.descriptor.name.clone(),
-                format!(
-                    "identifier exceeds the {MAX_PLUGIN_IDENTIFIER_BYTES}-byte plugin limit"
-                ),
+                format!("identifier exceeds the {MAX_PLUGIN_IDENTIFIER_BYTES}-byte plugin limit"),
             ));
         }
         let _permit = self
@@ -329,9 +327,7 @@ impl PluginRegistry {
         if identifier.len() > MAX_PLUGIN_IDENTIFIER_BYTES {
             return Err(PluginError::new(
                 "plugin-registry",
-                format!(
-                    "identifier exceeds the {MAX_PLUGIN_IDENTIFIER_BYTES}-byte plugin limit"
-                ),
+                format!("identifier exceeds the {MAX_PLUGIN_IDENTIFIER_BYTES}-byte plugin limit"),
             ));
         }
         for plugin in &self.plugins {

@@ -253,7 +253,10 @@ impl LavaSearchPlugin {
 
         let mut seen = HashSet::new();
         results.retain(|item| {
-            let source = item.get("source").and_then(Value::as_str).unwrap_or_default();
+            let source = item
+                .get("source")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let id = item.get("id").map(Value::to_string).unwrap_or_default();
             seen.insert((source.to_owned(), id))
         });

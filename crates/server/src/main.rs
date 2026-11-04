@@ -1905,7 +1905,10 @@ mod server_api_tests {
         let response = decode_tracks_endpoint(
             authorized_headers(),
             State(state()),
-            Json(EncodedTracks(vec!["not-decoded".to_owned(); MAX_DECODE_TRACK_BATCH + 1])),
+            Json(EncodedTracks(vec![
+                "not-decoded".to_owned();
+                MAX_DECODE_TRACK_BATCH + 1
+            ])),
         )
         .await;
 
