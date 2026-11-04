@@ -128,7 +128,20 @@ pub fn decode_bytes_limited(
     max_pcm_bytes: usize,
 ) -> Result<Vec<PcmFrame>, AudioError> {
     let mut frames = Vec::new();
+    let mut retained_bytes = 0_usize;
     decode_bytes_with(bytes, extension, max_pcm_bytes, |frame| {
+        let frame_bytes = frame
+            .samples
+            .len()
+            .saturating_mul(std::mem::size_of::<f32>());
+        retained_bytes = retained_bytes
+            .checked_add(frame_bytes)
+            .ok_or_else(|| AudioError::invalid("decoded PCM size overflow"))?;
+        if retained_bytes > max_pcm_bytes {
+            return Err(AudioError::invalid(
+                "decoded audio exceeds the configured PCM memory limit",
+            ));
+        }
         frames.push(frame);
         Ok(())
     })?;
@@ -137,10 +150,10 @@ pub fn decode_bytes_limited(
 
 /// Decode media incrementally, yielding each decoded packet to a caller.
 ///
-/// The PCM budget is cumulative across all emitted frames. Returning an error
-/// from the callback stops demuxing/decoding immediately and drops decoder
-/// state, which lets bounded consumers apply backpressure without retaining
-/// the complete decoded track in memory.
+/// The PCM limit bounds each decoded packet. Callbacks that retain frames must
+/// enforce their own cumulative storage budget; callbacks that stream or
+/// discard packets can process tracks longer than that limit. Returning an
+/// error stops demuxing/decoding immediately and drops decoder state.
 pub fn decode_bytes_with<F>(
     bytes: Vec<u8>,
     extension: Option<&str>,
@@ -178,7 +191,6 @@ where
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|error| AudioError::invalid(format!("codec initialization failed: {error}")))?;
 
-    let mut decoded_bytes = 0_usize;
     let mut emitted_frames = 0_usize;
     loop {
         let packet = match format.next_packet() {
@@ -213,12 +225,10 @@ where
             continue;
         }
 
-        decoded_bytes = decoded_bytes
-            .checked_add(pcm.len().saturating_mul(std::mem::size_of::<f32>()))
-            .ok_or_else(|| AudioError::invalid("decoded PCM size overflow"))?;
-        if decoded_bytes > max_pcm_bytes {
+        let frame_bytes = pcm.len().saturating_mul(std::mem::size_of::<f32>());
+        if frame_bytes > max_pcm_bytes {
             return Err(AudioError::invalid(
-                "decoded audio exceeds the configured PCM memory limit",
+                "decoded PCM packet exceeds the configured frame memory limit",
             ));
         }
 
@@ -1078,6 +1088,46 @@ mod tests {
         assert_eq!(frame.sample_rate, 48_000);
         decode.await.unwrap().unwrap();
         assert!(receiver.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn bounded_stream_decoder_can_process_more_than_one_frame_budget() {
+        let sample_count = 48_000_u32;
+        let data_bytes = sample_count * 2;
+        let mut wav = Vec::with_capacity(44 + data_bytes as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_bytes).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&96_000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_bytes.to_le_bytes());
+        for sample in 0..sample_count {
+            wav.extend_from_slice(&((sample % 30_000) as i16).to_le_bytes());
+        }
+
+        let error = decode_bytes_limited(wav.clone(), Some("wav"), 20_000).unwrap_err();
+        assert!(error.message.contains("PCM memory limit"));
+
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(128);
+        let decode = tokio::spawn(decode_bytes_to_channel(
+            wav,
+            Some("wav".to_owned()),
+            20_000,
+            sender,
+        ));
+        let mut decoded_bytes = 0_usize;
+        while let Some(frame) = receiver.recv().await {
+            let frame = frame.unwrap();
+            decoded_bytes += frame.samples.len() * std::mem::size_of::<f32>();
+        }
+        decode.await.unwrap().unwrap();
+        assert!(decoded_bytes > 20_000);
     }
 
     #[tokio::test]
