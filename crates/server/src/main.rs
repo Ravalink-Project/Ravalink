@@ -56,6 +56,7 @@ impl PlaybackSourceStore {
         }
     }
 
+    #[cfg(test)]
     async fn replace(
         &self,
         key: (String, String),
@@ -77,6 +78,7 @@ impl PlaybackSourceStore {
         Ok(previous)
     }
 
+    #[cfg(test)]
     async fn restore(
         &self,
         key: (String, String),
