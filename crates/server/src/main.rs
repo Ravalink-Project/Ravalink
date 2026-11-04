@@ -1822,7 +1822,7 @@ mod server_api_tests {
             voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_sources: HttpSourceManager::default(),
             playback_sources: PlaybackSourceStore::new(256 * 1024 * 1024),
-            plugins: built_in_plugins(&[]),
+            plugins: built_in_plugins(&[], std::path::Path::new("plugins")).unwrap(),
             metrics_enabled: false,
             player_update_interval: 5,
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
