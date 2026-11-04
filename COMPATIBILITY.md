@@ -25,6 +25,8 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Plugins | Native extension API | Rust plugin contract and built-in YouTube, LavaSrc and LavaSearch crates are implemented and registered statically; each plugin resolution is cancelled after a configurable-at-API-call timeout (30 seconds by default); external dynamic plugin discovery/loading and a stable third-party ABI are not implemented |
 | Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players, compressed source-cache bytes, retained seek-source bytes/limit and full-decode PCM usage/limit gauges |
 
+The native release smoke test now exercises authentication failures, route-planner disabled-state responses, malformed and empty decode requests, missing-session error serialization, unsupported-source empty results, and disabled metrics routing in addition to the basic version/info/stats checks.
+
 ## Acceptance rule
 
 A row moves to "compatible" only after automated tests cover both successful
