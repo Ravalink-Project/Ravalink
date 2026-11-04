@@ -176,6 +176,15 @@ struct PlayerUpdateQuery {
     no_replace: bool,
 }
 
+fn client_name_header(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("client-name")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
 fn has_http_scheme(identifier: &str) -> bool {
     identifier.split_once(':').is_some_and(|(scheme, _)| {
         scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
@@ -1680,10 +1689,13 @@ async fn websocket(
             return (StatusCode::BAD_REQUEST, "Missing or invalid User-Id header").into_response();
         }
     };
-    let client_name = headers
-        .get("client-name")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned);
+    let client_name = match client_name_header(&headers) {
+        Some(value) => Some(value),
+        None => {
+            return (StatusCode::BAD_REQUEST, "Missing or invalid Client-Name header")
+                .into_response();
+        }
+    };
     let requested_session = headers
         .get("session-id")
         .and_then(|v| v.to_str().ok())
@@ -1909,6 +1921,21 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[test]
+    fn websocket_client_name_header_is_required_and_non_empty() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(client_name_header(&headers), None);
+
+        headers.insert("client-name", HeaderValue::from_static("   "));
+        assert_eq!(client_name_header(&headers), None);
+
+        headers.insert("client-name", HeaderValue::from_static("Wavelink/3.4.1"));
+        assert_eq!(
+            client_name_header(&headers).as_deref(),
+            Some("Wavelink/3.4.1")
+        );
     }
 
     #[test]
