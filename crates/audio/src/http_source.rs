@@ -235,13 +235,9 @@ impl HttpSourceManager {
                 let _ = producer.await;
                 Err(error)
             }
-            Ok(()) => {
-                producer
-                    .await
-                    .map_err(|error| {
-                        AudioError::invalid(format!("HTTP stream task failed: {error}"))
-                    })?
-            }
+            Ok(()) => producer.await.map_err(|error| {
+                AudioError::invalid(format!("HTTP stream task failed: {error}"))
+            })?,
         }
     }
 
