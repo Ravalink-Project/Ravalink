@@ -20,7 +20,7 @@ use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, ExceptionSeverity, LoadResult, MemoryStats, NodeStats,
     PlayerStateUpdate, PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage,
     Track, TrackEndEvent, TrackEndReason, TrackEvent, TrackEventBase, TrackException,
-    TrackExceptionEvent, WebSocketMessage, decode_track, encode_track,
+    TrackExceptionEvent, TrackStuckEvent, WebSocketMessage, decode_track, encode_track,
 };
 use serde::Deserialize;
 use std::{
@@ -959,6 +959,9 @@ async fn run_voice_audio_loop(
     let mut interval = tokio::time::interval(Duration::from_millis(20));
     interval.tick().await;
     let mut speaking = false;
+    let mut last_position_ms = None;
+    let mut stalled_since: Option<Instant> = None;
+    let mut stuck_reported = false;
     loop {
         tokio::select! {
             changed = shutdown.changed() => {
@@ -996,7 +999,32 @@ async fn run_voice_audio_loop(
                     }
                     speaking = should_speak;
                 }
+                if !should_speak {
+                    last_position_ms = None;
+                    stalled_since = None;
+                    stuck_reported = false;
+                }
                 if should_speak {
+                    if let Some(player) = snapshot.as_ref() {
+                        if last_position_ms == Some(player.position_ms) {
+                            let stalled = stalled_since.get_or_insert_with(Instant::now);
+                            if !stuck_reported && stalled.elapsed() >= Duration::from_secs(10) {
+                                if let Some(encoded) = state
+                                    .players
+                                    .get(session_id, guild_id)
+                                    .await
+                                    .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned))
+                                {
+                                    publish_track_stuck(state, session_id, guild_id, encoded, 10_000);
+                                    stuck_reported = true;
+                                }
+                            }
+                        } else {
+                            last_position_ms = Some(player.position_ms);
+                            stalled_since = Some(Instant::now());
+                            stuck_reported = false;
+                        }
+                    }
                     let packet = {
                         let mut dave = connection.dave.lock().await;
                         state
@@ -1165,6 +1193,30 @@ fn publish_track_exception(
                 severity: ExceptionSeverity::Fault,
                 cause: cause.to_owned(),
             },
+        }))),
+    ));
+}
+
+fn publish_track_stuck(
+    state: &AppState,
+    session_id: &str,
+    guild_id: &str,
+    encoded_track: String,
+    threshold_ms: u64,
+) {
+    let track = match decode_track(&encoded_track) {
+        Ok(track) => track,
+        Err(error) => {
+            warn!(%error, %guild_id, "cannot publish TrackStuckEvent with an invalid encoded track");
+            return;
+        }
+    };
+    let _ = state.events.send((
+        session_id.to_owned(),
+        WebSocketMessage::Event(Box::new(TrackEvent::TrackStuck(TrackStuckEvent {
+            guild_id: guild_id.to_owned(),
+            track,
+            threshold_ms,
         }))),
     ));
 }
