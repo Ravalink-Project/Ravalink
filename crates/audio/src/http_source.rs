@@ -71,6 +71,201 @@ impl HttpSourceManager {
         }
     }
 
+    /// Resolve HTTP media metadata without downloading the media body.
+    ///
+    /// Duration is intentionally unknown at this stage. The actual stream is
+    /// opened when a player starts, allowing playback to begin before EOF.
+    pub async fn resolve_stream_track(
+        &self,
+        identifier: &str,
+    ) -> Result<ResolvedHttpTrack, AudioError> {
+        let url = reqwest::Url::parse(identifier)
+            .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
+        self.validate_url(&url).await?;
+        let client = self.streaming_client(&url).await?;
+        let response = client
+            .head(url.clone())
+            .send()
+            .await
+            .map_err(|error| AudioError::invalid(format!("HTTP source metadata request failed: {error}")))?
+            .error_for_status()
+            .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        let extension = url
+            .path_segments()
+            .and_then(|mut segments| segments.next_back())
+            .and_then(|segment| segment.rsplit_once('.').map(|(_, extension)| extension))
+            .map(str::to_ascii_lowercase);
+        let probe = probe_name(extension.as_deref(), content_type)
+            .ok_or_else(|| AudioError::invalid("unsupported direct HTTP audio format"))?;
+        let mut track = Track {
+            encoded: String::new(),
+            info: TrackInfo {
+                identifier: identifier.to_owned(),
+                is_seekable: false,
+                author: "Unknown".into(),
+                length: 0,
+                position: 0,
+                is_stream: true,
+                title: media_title(&url),
+                uri: Some(identifier.to_owned()),
+                source_name: "http".into(),
+                artwork_url: None,
+                isrc: None,
+            },
+            plugin_info: json!({}),
+            user_data: json!({}),
+        };
+        track.encoded = encode_track_with_source_data(&track, Some(probe))
+            .map_err(|error| AudioError::invalid(error.message))?;
+        Ok(ResolvedHttpTrack {
+            track,
+            duration_ms: 0,
+        })
+    }
+
+    /// Fetch, demux and decode an HTTP response concurrently with network input.
+    /// Both the compressed-byte bridge and decoded-PCM queue are bounded.
+    pub async fn stream_to_channel(
+        &self,
+        identifier: &str,
+        max_pcm_bytes: usize,
+        sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
+    ) -> Result<(), AudioError> {
+        let permit = self
+            .resolve_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| AudioError::invalid("HTTP source resolver is shutting down"))?;
+        let url = reqwest::Url::parse(identifier)
+            .map_err(|error| AudioError::invalid(format!("invalid media URL: {error}")))?;
+        self.validate_url(&url).await?;
+        let client = self.streaming_client(&url).await?;
+        let mut response = client
+            .get(url.clone())
+            .send()
+            .await
+            .map_err(|error| AudioError::invalid(format!("HTTP source request failed: {error}")))?
+            .error_for_status()
+            .map_err(|error| AudioError::invalid(format!("HTTP source returned an error: {error}")))?;
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let extension = url
+            .path_segments()
+            .and_then(|mut segments| segments.next_back())
+            .and_then(|segment| segment.rsplit_once('.').map(|(_, extension)| extension))
+            .map(str::to_ascii_lowercase);
+        let probe = probe_name(extension.as_deref(), &content_type)
+            .ok_or_else(|| AudioError::invalid("unsupported direct HTTP audio format"))?;
+        let (compressed_sender, compressed_receiver) = tokio::sync::mpsc::channel(4);
+        let producer = tokio::spawn(async move {
+            let _permit = permit;
+            loop {
+                let chunk = tokio::time::timeout(Duration::from_secs(60), response.chunk())
+                    .await
+                    .map_err(|_| AudioError::invalid("HTTP media stream stalled for 60 seconds"))?
+                    .map_err(|error| AudioError::invalid(format!("HTTP media stream failed: {error}")))?;
+                let Some(chunk) = chunk else {
+                    return Ok::<(), AudioError>(());
+                };
+                if compressed_sender.send(Ok(chunk.to_vec())).await.is_err() {
+                    return Ok(());
+                }
+            }
+        });
+
+        let decoded = crate::decode_stream_to_channel(
+            compressed_receiver,
+            Some(probe.to_ascii_lowercase()),
+            max_pcm_bytes,
+            sender,
+        )
+        .await;
+        if decoded.is_err() {
+            producer.abort();
+        }
+        let network_result = producer
+            .await
+            .map_err(|error| AudioError::invalid(format!("HTTP stream task failed: {error}")))?;
+        decoded?;
+        network_result
+    }
+
+    async fn validate_url(&self, url: &reqwest::Url) -> Result<(), AudioError> {
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(AudioError::invalid("only HTTP and HTTPS media URLs are supported"));
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(AudioError::invalid("HTTP source URLs must not embed credentials"));
+        }
+        let host = url
+            .host_str()
+            .ok_or_else(|| AudioError::invalid("HTTP source URL has no host"))?;
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| AudioError::invalid("HTTP source URL has no known port"))?;
+        let addresses = match host.parse::<IpAddr>() {
+            Ok(address) => vec![SocketAddr::new(address, port)],
+            Err(_) => tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::net::lookup_host((host, port)),
+            )
+            .await
+            .map_err(|_| AudioError::invalid("HTTP source DNS lookup timed out"))?
+            .map_err(|error| AudioError::invalid(format!("cannot resolve HTTP source host: {error}")))?
+            .collect::<Vec<_>>(),
+        };
+        if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+            return Err(AudioError::invalid(
+                "HTTP source host resolves to a private or reserved network address",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn streaming_client(&self, url: &reqwest::Url) -> Result<reqwest::Client, AudioError> {
+        let host = url
+            .host_str()
+            .ok_or_else(|| AudioError::invalid("HTTP source URL has no host"))?;
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| AudioError::invalid("HTTP source URL has no known port"))?;
+        let addresses = match host.parse::<IpAddr>() {
+            Ok(address) => vec![SocketAddr::new(address, port)],
+            Err(_) => tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::net::lookup_host((host, port)),
+            )
+            .await
+            .map_err(|_| AudioError::invalid("HTTP source DNS lookup timed out"))?
+            .map_err(|error| AudioError::invalid(format!("cannot resolve HTTP source host: {error}")))?
+            .collect::<Vec<_>>(),
+        };
+        if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+            return Err(AudioError::invalid(
+                "HTTP source host resolves to a private or reserved network address",
+            ));
+        }
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(None)
+            .user_agent("RavaLink/0.1 native-audio")
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .resolve_to_addrs(host, &addresses)
+            .build()
+            .map_err(|error| AudioError::invalid(format!("cannot build HTTP client: {error}")))
+    }
+
     /// Resolve and decode a direct HTTP(S) media URL.
     ///
     /// This initial adapter buffers the source before decoding. It is intended
