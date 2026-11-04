@@ -11,7 +11,7 @@ use axum::{
     routing::{get, post},
 };
 use ravalink_audio::{
-    AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager, PcmFrame,
+    AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager,
     decode_bytes_limited, decode_bytes_to_channel,
 };
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
