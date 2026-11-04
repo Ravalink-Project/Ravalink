@@ -482,6 +482,36 @@ mod tests {
         );
     }
 
+    async fn one_shot_http_response(status: &str, body: &str) -> String {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let status = status.to_owned();
+        let body = body.to_owned();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn request_json_fails_over_to_the_next_invidious_instance() {
+        let unavailable = one_shot_http_response("503 Service Unavailable", "").await;
+        let healthy = one_shot_http_response("200 OK", r#"{"ok":true}"#).await;
+        let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
+
+        let response = plugin.request_json("/api/v1/health").await.unwrap();
+        assert_eq!(response["ok"], true);
+    }
+
     #[test]
     fn parses_standard_short_and_shorts_urls() {
         assert_eq!(
