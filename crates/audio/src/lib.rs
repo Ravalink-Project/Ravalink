@@ -1636,6 +1636,63 @@ mod tests {
     }
 
     #[test]
+    fn equalizer_changes_the_targeted_frequency_band() {
+        let filters: Filters = serde_json::from_value(json!({
+            "equalizer": [{"band": 8, "gain": 1.0}]
+        }))
+        .unwrap();
+        let mut processor = DspProcessor::new(filters);
+        let input = (0..480)
+            .map(|sample| {
+                (std::f32::consts::TAU * 1_000.0 * sample as f32 / 48_000.0).sin() * 0.25
+            })
+            .collect::<Vec<_>>();
+        let input_energy = input.iter().map(|sample| sample * sample).sum::<f32>();
+        let mut output = frame(input, 1);
+        processor.process(&mut output).unwrap();
+        let output_energy = output.samples.iter().map(|sample| sample * sample).sum::<f32>();
+        assert!(output_energy > input_energy);
+    }
+
+    #[test]
+    fn karaoke_filter_cancels_centered_vocals() {
+        let filters: Filters = serde_json::from_value(json!({
+            "karaoke": {"level": 1.0, "monoLevel": 1.0}
+        }))
+        .unwrap();
+        let mut processor = DspProcessor::new(filters);
+        let mut input = frame(vec![0.75, 0.75, -0.5, -0.5], 2);
+        processor.process(&mut input).unwrap();
+        assert!(input.samples.iter().all(|sample| sample.abs() < 0.0001));
+    }
+
+    #[test]
+    fn tremolo_applies_depth_and_keeps_phase_continuous() {
+        let filters: Filters = serde_json::from_value(json!({
+            "tremolo": {"frequency": 2.0, "depth": 1.0}
+        }))
+        .unwrap();
+        let mut processor = DspProcessor::new(filters);
+        let mut first = frame(vec![1.0, 1.0], 1);
+        processor.process(&mut first).unwrap();
+        assert!((first.samples[0] - 0.5).abs() < 0.0001);
+        let mut second = frame(vec![1.0, 1.0], 1);
+        processor.process(&mut second).unwrap();
+        assert!(second.samples[0] > first.samples[0]);
+    }
+
+    #[test]
+    fn distortion_filter_produces_bounded_finite_output() {
+        let filters: Filters = serde_json::from_value(json!({"distortion": {}})).unwrap();
+        let mut processor = DspProcessor::new(filters);
+        let mut input = frame(vec![0.1, -0.1, 0.5, -0.5], 2);
+        processor.process(&mut input).unwrap();
+        assert!(input.samples.iter().all(|sample| sample.is_finite()));
+        assert!(input.samples.iter().all(|sample| (-1.0..=1.0).contains(sample)));
+        assert_ne!(input.samples, vec![0.1, -0.1, 0.5, -0.5]);
+    }
+
+    #[test]
     fn rotation_filter_rotates_the_stereo_field() {
         let filters: Filters = serde_json::from_value(json!({
             "rotation": {"rotationHz": 0.0}
