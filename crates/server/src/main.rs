@@ -1506,7 +1506,10 @@ async fn resolve_player_track(
         .resolve_stream_track(&uri)
         .await
         .map_err(|error| error.message)?;
+    let user_data = track.user_data;
     track = resolved.track;
+    track.user_data = user_data;
+    track.encoded = encode_track(&track).map_err(|error| error.message)?;
     Ok((track, uri))
 }
 
@@ -1533,6 +1536,7 @@ async fn resolve_plugin_audio_track(
         .to_owned();
     track.info.is_stream = true;
     track.info.is_seekable = false;
+    track.encoded = encode_track(&track).map_err(|error| error.message)?;
     Ok((track, stream_url))
 }
 
