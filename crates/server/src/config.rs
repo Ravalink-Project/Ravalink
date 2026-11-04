@@ -26,7 +26,7 @@ impl Default for ServerConfig {
         Self {
             address: "0.0.0.0".into(),
             port: 2333,
-            password: "youshallnotpass".into(),
+            password: String::new(),
             player_update_interval: 5,
         }
     }
@@ -208,8 +208,19 @@ fn validate_audio_config(audio: &AudioConfig) -> Result<(), String> {
 }
 
 fn validate_server_password(password: &str) -> Result<(), String> {
-    if password.trim().is_empty() {
-        return Err("server.password must not be empty".to_owned());
+    let normalized = password.trim();
+    if normalized.is_empty() {
+        return Err("server.password must be set before starting RavaLink".to_owned());
+    }
+    if normalized.len() < 16 {
+        return Err("server.password must contain at least 16 characters".to_owned());
+    }
+    let normalized_lower = normalized.to_ascii_lowercase();
+    if ["youshallnotpass", "replace-with", "change_me", "changeme"]
+        .iter()
+        .any(|placeholder| normalized_lower.contains(placeholder))
+    {
+        return Err("server.password still contains a known example/default value".to_owned());
     }
     Ok(())
 }
@@ -296,10 +307,19 @@ mod tests {
     }
 
     #[test]
-    fn server_password_must_not_be_empty() {
-        assert!(validate_server_password("secret").is_ok());
+    fn server_password_must_be_a_real_secret() {
+        assert!(validate_server_password("a-secure-test-password").is_ok());
         assert!(validate_server_password("").is_err());
         assert!(validate_server_password("   ").is_err());
+        assert!(validate_server_password("short").is_err());
+        assert!(validate_server_password("youshallnotpass").is_err());
+        assert!(validate_server_password("replace-with-a-long-random-secret").is_err());
+        assert!(validate_server_password("CHANGE_ME_123456789012345").is_err());
+    }
+
+    #[test]
+    fn default_server_configuration_cannot_start_with_a_public_default_secret() {
+        assert!(validate_server_password(&ServerConfig::default().password).is_err());
     }
 
     #[test]

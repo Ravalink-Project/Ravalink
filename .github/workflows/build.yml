@@ -1,161 +1,50 @@
-name: Build
+name: Native build
 
 on:
   push:
-    branches: [ 'master' ]
+    branches: ["rust-native"]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
-      - '.github/workflows/docs-pr.yml'
+      - "**.md"
+      - "docs/**"
+  pull_request:
   workflow_call:
-    secrets:
-      DOCKER_REGISTRY:
-        required: false
-      DOCKER_USERNAME:
-        required: false
-      DOCKER_TOKEN:
-        required: false
-      DOCKER_IMAGE:
-        required: false
-      MAVEN_USERNAME:
-        required: false
-      MAVEN_PASSWORD:
-        required: false
-      MAVEN_CENTRAL_USERNAME:
-        required: false
-      MAVEN_CENTRAL_PASSWORD:
-        required: false
-      SIGNING_IN_MEMORY_KEY:
-        required: false
-      SIGNING_IN_MEMORY_KEY_PASSWORD:
-        required: false
+
+concurrency:
+  group: native-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          distribution: zulu
-          java-version: 17
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build Lavalink
-        run: ./gradlew build
-
-      - name: Build Lavalink musl
-        run: ./gradlew build -PtargetPlatform=musl
-
-      - name: Publish to Maven
-        env:
-          ORG_GRADLE_PROJECT_MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
-          ORG_GRADLE_PROJECT_MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
-        run: ./gradlew publish
-
-      - name: Upload Lavalink.jar
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lavalink.jar
-          path: LavalinkServer/build/libs/Lavalink.jar
-
-      - name: Upload Lavalink-musl.jar
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lavalink-musl.jar
-          path: LavalinkServer/build/libs/Lavalink-musl.jar
-
-  build-docker:
-    needs: build
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build release executable
+        run: cargo build --release -p ravalink-server
+      - name: API smoke test
+        run: bash scripts/smoke-test.sh target/release/ravalink
+  cross-compile:
+    name: Linux ARM64 cross-compile
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Ubuntu
-            dockerfile: LavalinkServer/docker/Dockerfile
-            suffix: ''
-            platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
-            artifact: Lavalink.jar
-          - name: Alpine
-            dockerfile: LavalinkServer/docker/alpine.Dockerfile
-            suffix: '-alpine'
-            platforms: linux/amd64,linux/arm64/v8
-            artifact: Lavalink-musl.jar
-          - name: Distroless
-            dockerfile: LavalinkServer/docker/distroless.Dockerfile
-            suffix: '-distroless'
-            platforms: linux/amd64,linux/arm64/v8
-            artifact: Lavalink.jar
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download ${{ matrix.artifact }}
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Build ARM64 executable
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          name: ${{ matrix.artifact }}
-          path: LavalinkServer/build/libs/
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to docker registry
-        env:
-          DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-          DOCKER_IMAGE: ${{ secrets.DOCKER_IMAGE }}
-        if: env.DOCKER_REGISTRY != '' && env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != '' && env.DOCKER_IMAGE != ''
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.DOCKER_REGISTRY }}
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Docker Meta ${{ matrix.name }}
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            ${{ secrets.DOCKER_IMAGE }}
-          flavor: |
-            suffix=${{ matrix.suffix }},onlatest=true
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=
-
-      - name: Docker Build ${{ matrix.name }} and Push
-        uses: docker/build-push-action@v6
-        with:
-          file: ${{ matrix.dockerfile }}
-          context: .
-          platforms: ${{ matrix.platforms }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          target: aarch64-unknown-linux-gnu
+          args: "--release -p ravalink-server"
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native Docker image
+        run: docker build --tag ravalink:ci .

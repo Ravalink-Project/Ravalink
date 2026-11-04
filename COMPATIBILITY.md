@@ -33,7 +33,9 @@ and failure paths and the same test scenario has been checked against Lavalink v
 
 ## Track codec limitations
 
-The native audio path currently buffers and decodes a complete direct HTTP(S) file before playback. It is not a continuous streaming engine; large or live sources are intentionally unsupported until the streaming decoder and back-pressure path are implemented.\n\nThe codec reads Lavaplayer track-info versions 1 through 3 and preserves the
+The native audio path currently buffers and decodes a complete direct HTTP(S) file before playback. It is not a continuous streaming engine; large or live sources are intentionally unsupported until the streaming decoder and back-pressure path are implemented.
+
+The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are
 known to contain no extra data, plus the HTTP/local probing descriptor. Plugin
 source managers with custom binary payloads are rejected explicitly rather

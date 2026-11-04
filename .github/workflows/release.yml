@@ -1,47 +1,92 @@
-name: Release
+name: Native release
 
 on:
-  release:
-    types: [ published ]
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
-    secrets:
-      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-      DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
-      DOCKER_IMAGE: ${{ secrets.DOCKER_IMAGE }}
-      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
-      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      SIGNING_IN_MEMORY_KEY: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
-      SIGNING_IN_MEMORY_KEY_PASSWORD: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
-
-  release:
-    needs: build
+  verify:
+    name: Verify source and API smoke test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Lavalink.jar
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          name: Lavalink.jar
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Tests
+        run: cargo test --workspace --all-targets
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build server
+        run: cargo build --release -p ravalink-server
+      - name: API smoke test
+        run: bash scripts/smoke-test.sh target/release/ravalink
 
-      - name: Download Lavalink-musl.jar
-        uses: actions/download-artifact@v4
+  binaries:
+    name: Linux ${{ matrix.arch }}
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            asset: ravalink-linux-x86_64
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            asset: ravalink-linux-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release binary
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          name: Lavalink-musl.jar
+          target: ${{ matrix.target }}
+          args: "--release -p ravalink-server"
+          strip: true
+      - name: Stage release asset
+        run: |
+          install -D "target/${{ matrix.target }}/release/ravalink" "dist/${{ matrix.asset }}"
+          chmod 0755 "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Upload Artifacts to GitHub Release
-        uses: ncipollo/release-action@v1
+  publish:
+    name: Publish GitHub release assets
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          artifacts: Lavalink.jar,Lavalink-musl.jar
-          allowUpdates: true
-          omitBodyDuringUpdate: true
-          omitDraftDuringUpdate: true
-          omitNameDuringUpdate: true
-          omitPrereleaseDuringUpdate: true
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum ravalink-linux-* > SHA256SUMS
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/ravalink-linux-x86_64
+            dist/ravalink-linux-aarch64
+            dist/SHA256SUMS

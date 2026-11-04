@@ -27,10 +27,13 @@ Requirements: a current stable Rust toolchain.
 ```bash
 cargo build --workspace
 cargo test --workspace
+export RAVALINK_PASSWORD="$(openssl rand -hex 32)"
 cargo run -p ravalink-server
 ```
 
-The server listens on `0.0.0.0:2333` by default.
+The server listens on `0.0.0.0:2333` by default. A password of at least
+16 characters is mandatory. RavaLink refuses to start with an empty, short,
+or known example password.
 
 ## Configuration
 
