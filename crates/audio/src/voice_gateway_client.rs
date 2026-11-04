@@ -460,11 +460,29 @@ async fn resume_voice_gateway(
 ) -> Result<(VoiceWebSocket, Interval), AudioError> {
     let url =
         voice_gateway_url(endpoint).map_err(|error| AudioError::invalid(error.to_string()))?;
-    let (mut socket, _) = connect_async(url).await.map_err(|error| {
-        AudioError::invalid(format!("voice websocket resume connect failed: {error}"))
-    })?;
+    let connect = tokio::time::timeout(Duration::from_secs(15), connect_async(url));
+    let (mut socket, _) = tokio::select! {
+        changed = shutdown.changed() => {
+            if changed.is_err() || *shutdown.borrow() {
+                return Err(AudioError::invalid("voice resume was cancelled"));
+            }
+            return Err(AudioError::invalid("voice resume was interrupted"));
+        }
+        result = connect => match result {
+            Ok(Ok(connection)) => connection,
+            Ok(Err(error)) => {
+                return Err(AudioError::invalid(format!(
+                    "voice websocket resume connect failed: {error}"
+                )));
+            }
+            Err(_) => {
+                return Err(AudioError::invalid("voice websocket resume connection timed out"));
+            }
+        }
+    };
     machine.request_resume();
     let mut heartbeat: Option<Interval> = None;
+    let resume_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
 
     loop {
         let incoming = if let Some(interval) = heartbeat.as_mut() {
@@ -474,6 +492,9 @@ async fn resume_voice_gateway(
                         return Err(AudioError::invalid("voice resume was cancelled"));
                     }
                     continue;
+                }
+                _ = tokio::time::sleep_until(resume_deadline) => {
+                    return Err(AudioError::invalid("Discord voice session resume timed out"));
                 }
                 _ = interval.tick() => {
                     send_voice_json(&mut socket, machine.heartbeat(unix_time_ms())).await?;
@@ -488,6 +509,9 @@ async fn resume_voice_gateway(
                         return Err(AudioError::invalid("voice resume was cancelled"));
                     }
                     continue;
+                }
+                _ = tokio::time::sleep_until(resume_deadline) => {
+                    return Err(AudioError::invalid("Discord voice session resume timed out"));
                 }
                 incoming = socket.next() => incoming,
             }

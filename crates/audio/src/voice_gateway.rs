@@ -510,15 +510,32 @@ pub fn voice_gateway_url(endpoint: &str) -> Result<String, VoiceGatewayError> {
     let endpoint = endpoint.trim();
     if endpoint.is_empty()
         || endpoint.contains("://")
+        || endpoint.chars().any(char::is_whitespace)
         || endpoint
             .chars()
-            .any(|c| matches!(c, '/' | '?' | '#' | '@' | '\r' | '\n'))
+            .any(|c| matches!(c, '/' | '?' | '#' | '@' | '\\\\' | '\r' | '\n'))
     {
         return Err(VoiceGatewayError::InvalidPayload(
             "voice gateway endpoint must be a hostname with an optional port".into(),
         ));
     }
-    Ok(format!("wss://{endpoint}/?v=8"))
+
+    let url = reqwest::Url::parse(&format!("wss://{endpoint}/?v=8")).map_err(|_| {
+        VoiceGatewayError::InvalidPayload("voice gateway endpoint is not a valid host".into())
+    })?;
+    if url.scheme() != "wss"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query() != Some("v=8")
+        || url.fragment().is_some()
+    {
+        return Err(VoiceGatewayError::InvalidPayload(
+            "voice gateway endpoint must be a hostname with an optional port".into(),
+        ));
+    }
+    Ok(url.to_string())
 }
 
 #[cfg(test)]
@@ -759,5 +776,10 @@ mod tests {
         );
         assert!(voice_gateway_url("wss://evil.example/path").is_err());
         assert!(voice_gateway_url("user@host").is_err());
+        assert!(voice_gateway_url("host.example/path").is_err());
+        assert!(voice_gateway_url("host.example?query=1").is_err());
+        assert!(voice_gateway_url("host.example#fragment").is_err());
+        assert!(voice_gateway_url("host with spaces.example").is_err());
+        assert!(voice_gateway_url("host.example\\\\evil").is_err());
     }
 }
