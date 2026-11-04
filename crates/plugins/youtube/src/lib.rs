@@ -123,7 +123,7 @@ impl YouTubePlugin {
         let mut failures = Vec::new();
         for api_base in &self.api_bases {
             let url = format!("{api_base}{path}");
-            let response = match self.client.get(&url).send().await {
+            let mut response = match self.client.get(&url).send().await {
                 Ok(response) => match response.error_for_status() {
                     Ok(response) => response,
                     Err(error) => {
