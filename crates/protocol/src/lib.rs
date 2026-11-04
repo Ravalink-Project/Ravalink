@@ -77,7 +77,7 @@ impl Default for ServerInfo {
             version: VersionInfo::default(),
             build_time: 0,
             git: GitInfo {
-                branch: "rust-native".into(),
+                branch: "master".into(),
                 commit: "unknown".into(),
                 commit_time: 0,
             },
