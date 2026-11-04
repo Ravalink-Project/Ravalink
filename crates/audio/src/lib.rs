@@ -714,7 +714,8 @@ impl NativePlayer {
         if let Some(result) = self
             .streamed_frames
             .as_mut()
-            .map(|receiver| receiver.try_recv()) {
+            .map(|receiver| receiver.try_recv())
+        {
             match result {
                 Ok(frame) => {
                     let processed = self.process_frame(frame)?;
@@ -1292,7 +1293,6 @@ mod tests {
         assert!(player.take_completed_track().is_none());
     }
 }
-
 
 #[cfg(test)]
 mod streamed_queue_tests {
