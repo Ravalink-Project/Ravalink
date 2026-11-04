@@ -297,7 +297,7 @@ impl HttpSourceManager {
     /// This initial adapter buffers the source before decoding. It is intended
     /// for bounded files, not live radio streams or large remote archives.
     pub async fn resolve(&self, identifier: &str) -> Result<ResolvedHttpTrack, AudioError> {
-        let _resolve_permit = tokio::time::timeout(
+        let resolve_permit = tokio::time::timeout(
             Duration::from_secs(5),
             self.resolve_slots.clone().acquire_owned(),
         )
