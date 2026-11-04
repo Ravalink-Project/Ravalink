@@ -25,7 +25,7 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Plugins | Native extension API | Rust plugin contract and built-in YouTube, LavaSrc and LavaSearch crates are implemented; optional external Rust extensions can be registered as short-lived child processes through a versioned JSON-over-stdio protocol, with an allowlisted environment, a 4 MiB response cap, two concurrent invocations per extension and a 30-second per-plugin timeout; in-process dynamic library loading and a stable binary ABI are intentionally not provided |
 | Prometheus | Configurable metrics endpoint | Optional unauthenticated Prometheus exposition endpoint; uptime, sessions, players, playing players, compressed source-cache bytes, retained seek-source bytes/limit and full-decode PCM usage/limit gauges |
 
-The native release smoke test now exercises authentication failures, route-planner disabled-state responses, malformed and empty decode requests, missing-session error serialization, unsupported-source empty results, and disabled metrics routing in addition to the basic version/info/stats checks.
+The native release smoke test exercises the Lavalink v4 version string, authentication failures, required info/stats fields, omission of frameStats, route-planner disabled-state responses, missing-input decode errors, unsupported-source empty results, missing-session error serialization, and disabled metrics routing. This is a server smoke test, not a substitute for the full REST/WebSocket contract suite or upstream differential tests.
 
 External process extensions use the contract documented in [External Rust extensions](docs/plugins/external-process.md). They run as the RavaLink service account and are trusted code, not sandboxed workloads.
 
