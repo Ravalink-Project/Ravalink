@@ -123,7 +123,7 @@ pub fn decode_bytes(bytes: Vec<u8>, extension: Option<&str>) -> Result<Vec<PcmFr
 
 /// Decode audio while enforcing a hard upper bound on retained interleaved PCM.
 pub fn decode_bytes_limited(
-    bytes: Vec<u8>,
+    bytes: impl Into<std::sync::Arc<[u8]>>,
     extension: Option<&str>,
     max_pcm_bytes: usize,
 ) -> Result<Vec<PcmFrame>, AudioError> {
