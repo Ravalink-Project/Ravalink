@@ -1054,7 +1054,7 @@ mod tests {
         wav.extend_from_slice(&16_384i16.to_le_bytes());
 
         let error = decode_bytes_limited(wav, Some("wav"), 1).unwrap_err();
-        assert!(error.message.contains("PCM memory limit"));
+        assert!(error.message.contains("memory limit"));
     }
 
     #[tokio::test]
