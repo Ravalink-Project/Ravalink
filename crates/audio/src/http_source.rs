@@ -75,7 +75,7 @@ impl HttpSourceManager {
     /// This initial adapter buffers the source before decoding. It is intended
     /// for bounded files, not live radio streams or large remote archives.
     pub async fn resolve(&self, identifier: &str) -> Result<ResolvedHttpTrack, AudioError> {
-        let _resolve_permit = self
+        let resolve_permit = self
             .resolve_slots
             .clone()
             .acquire_owned()
@@ -180,6 +180,9 @@ impl HttpSourceManager {
         let decode_extension = extension.clone();
         let max_pcm_bytes = self.max_cache_bytes;
         let (frame_count, sample_rate) = tokio::task::spawn_blocking(move || {
+            // Keep the slot occupied if the async request is cancelled while
+            // this non-cancellable blocking decode is still running.
+            let _resolve_permit = resolve_permit;
             let mut frame_count = 0_u64;
             let mut sample_rate = None;
             let mut channels = None;
