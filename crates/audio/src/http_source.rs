@@ -476,12 +476,7 @@ mod tests {
     fn rejects_entries_larger_than_the_entire_cache_without_evicting_or_caching_them() {
         let manager = HttpSourceManager::new(16);
         manager
-            .insert_cache(
-                "kept".into(),
-                Arc::from(vec![1; 8]),
-                Some("mp3".into()),
-                64,
-            )
+            .insert_cache("kept".into(), Arc::from(vec![1; 8]), Some("mp3".into()), 64)
             .unwrap();
         let error = manager
             .insert_cache(
