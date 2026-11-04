@@ -83,7 +83,9 @@ impl PlaybackSourceStore {
 
     async fn remove_session(&self, session_id: &str) {
         let mut state = self.inner.lock().await;
-        state.entries.retain(|(session, _), _| session != session_id);
+        state
+            .entries
+            .retain(|(session, _), _| session != session_id);
         state.bytes_used = state.entries.values().fold(0_usize, |total, source| {
             total.saturating_add(source.bytes.len())
         });
@@ -583,7 +585,10 @@ async fn delete_player(
         );
     }
     shutdown_voice_task(&state, &session_id, &_guild_id).await;
-    state.playback_sources.remove(&(session_id.clone(), _guild_id.clone())).await;
+    state
+        .playback_sources
+        .remove(&(session_id.clone(), _guild_id.clone()))
+        .await;
     state.audio_players.remove(&session_id, &_guild_id).await;
     state.players.remove(&session_id, &_guild_id).await;
     StatusCode::NO_CONTENT.into_response()
@@ -808,7 +813,10 @@ async fn update_player(
             );
         }
         state.audio_players.stop(&session_id, &guild_id).await;
-        state.playback_sources.remove(&(session_id.clone(), guild_id.clone())).await;
+        state
+            .playback_sources
+            .remove(&(session_id.clone(), guild_id.clone()))
+            .await;
         let object = normalized_update
             .as_object_mut()
             .expect("validated JSON object");
@@ -1333,7 +1341,10 @@ async fn seek_player_source(
     if track.is_stream {
         return Err("live streams are not seekable".to_owned());
     }
-    if track.duration_ms.is_some_and(|duration| position_ms > duration) {
+    if track
+        .duration_ms
+        .is_some_and(|duration| position_ms > duration)
+    {
         return Err("seek position exceeds track duration".to_owned());
     }
     let key = (session_id.to_owned(), guild_id.to_owned());
