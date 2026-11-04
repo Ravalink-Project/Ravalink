@@ -35,12 +35,13 @@ and failure paths and the same test scenario has been checked against Lavalink v
 
 The native HTTP source path still buffers a complete direct HTTP(S) file before playback. The codec layer now exposes `decode_bytes_with`, which transfers each decoded packet to a caller-owned sink and enforces a cumulative PCM budget without collecting the whole decoded track. The bounded-channel decoder is now available as a reusable primitive, but the HTTP source adapter and NativePlayer are not yet wired through it. This is not yet end-to-end continuous or live streaming. Large/live source support remains pending.
 
-The playback queue is bounded and consumed directly by NativePlayer, but the
-current HTTP source adapter still downloads and decodes the complete file before
-the producer begins feeding that queue. This reduces the amount of decoded PCM
-retained by the active player as playback progresses; it does not yet make HTTP
-fetching or decoding incremental. Streamed-queue playback currently cannot seek,
-and live HTTP sources remain unsupported.
+The playback queue is bounded and consumed directly by NativePlayer. Its
+producer currently owns the already-decoded frame vector, so this separates
+player-side buffering and provides backpressure at the playback boundary but
+does not reduce the total PCM retained by the process during decoding. The HTTP
+source adapter still downloads and decodes the complete file before playback.
+Non-zero initial positions use the seekable decoded-frame path; live HTTP
+sources and end-to-end incremental network decoding remain unsupported.
 
 The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
 original encoded string. It supports built-in sources whose track payloads are

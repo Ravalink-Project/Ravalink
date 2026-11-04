@@ -711,7 +711,10 @@ impl NativePlayer {
         if self.track.is_none() || self.paused {
             return Ok(None);
         }
-        if let Some(result) = self.streamed_frames.as_mut().map(|receiver| receiver.try_recv()) {
+        if let Some(result) = self
+            .streamed_frames
+            .as_mut()
+            .map(|receiver| receiver.try_recv()) {
             match result {
                 Ok(frame) => {
                     let processed = self.process_frame(frame)?;
@@ -832,7 +835,9 @@ impl AudioPipeline for NativePlayer {
             return Err(AudioError::invalid("live streams are not seekable"));
         }
         if self.streamed_frames.is_some() {
-            return Err(AudioError::invalid("cannot seek while a bounded PCM stream is active"));
+            return Err(AudioError::invalid(
+                "cannot seek while a bounded PCM stream is active",
+            ));
         }
         if track
             .duration_ms
@@ -1307,11 +1312,14 @@ mod streamed_queue_tests {
         player.load_streamed_track(track.clone(), receiver).unwrap();
         assert!(player.next_frame().unwrap().is_none());
 
-        sender.send(PcmFrame {
-            samples: vec![0.1, -0.1],
-            channels: 2,
-            sample_rate: 48_000,
-        }).await.unwrap();
+        sender
+            .send(PcmFrame {
+                samples: vec![0.1, -0.1],
+                channels: 2,
+                sample_rate: 48_000,
+            })
+            .await
+            .unwrap();
         assert!(player.next_frame().unwrap().is_some());
         drop(sender);
 
@@ -1323,13 +1331,18 @@ mod streamed_queue_tests {
     async fn streamed_queue_rejects_seek_until_a_seekable_source_is_reopened() {
         let (_sender, receiver) = tokio::sync::mpsc::channel(1);
         let mut player = NativePlayer::default();
-        player.load_streamed_track(AudioTrack {
-            identifier: "streamed".into(),
-            title: "Streamed track".into(),
-            author: "Test".into(),
-            duration_ms: Some(60_000),
-            is_stream: false,
-        }, receiver).unwrap();
+        player
+            .load_streamed_track(
+                AudioTrack {
+                    identifier: "streamed".into(),
+                    title: "Streamed track".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(60_000),
+                    is_stream: false,
+                },
+                receiver,
+            )
+            .unwrap();
         assert!(player.seek(1_000).is_err());
     }
 }

@@ -670,21 +670,31 @@ async fn update_player(
             duration_ms: u64::try_from(track.info.length).ok(),
             is_stream: track.info.is_stream,
         };
-        let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
-        if let Err(error) = state
-            .audio_players
-            .load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver)
-            .await
-        {
-            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-        }
-        tokio::spawn(async move {
-            for frame in frames {
-                if pcm_sender.send(frame).await.is_err() {
-                    break;
-                }
+        if track.info.position > 0 {
+            if let Err(error) = state
+                .audio_players
+                .load_decoded_track(&session_id, &guild_id, audio_track, frames)
+                .await
+            {
+                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
             }
-        });
+        } else {
+            let (pcm_sender, pcm_receiver) = tokio::sync::mpsc::channel(8);
+            if let Err(error) = state
+                .audio_players
+                .load_streamed_track(&session_id, &guild_id, audio_track, pcm_receiver)
+                .await
+            {
+                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+            }
+            tokio::spawn(async move {
+                for frame in frames {
+                    if pcm_sender.send(frame).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
         if track.info.position > 0
             && let Err(error) = state
                 .audio_players
