@@ -226,14 +226,23 @@ impl HttpSourceManager {
             sender,
         )
         .await;
-        if decoded.is_err() {
-            producer.abort();
+        match decoded {
+            Err(error) => {
+                // Preserve the decoder/consumer error. Aborting the network
+                // producer is expected here and must not mask the real failure
+                // with a cancelled-task JoinError.
+                producer.abort();
+                let _ = producer.await;
+                Err(error)
+            }
+            Ok(()) => {
+                producer
+                    .await
+                    .map_err(|error| {
+                        AudioError::invalid(format!("HTTP stream task failed: {error}"))
+                    })?
+            }
         }
-        let network_result = producer
-            .await
-            .map_err(|error| AudioError::invalid(format!("HTTP stream task failed: {error}")))?;
-        decoded?;
-        network_result
     }
 
     async fn streaming_client(&self, url: &reqwest::Url) -> Result<reqwest::Client, AudioError> {
