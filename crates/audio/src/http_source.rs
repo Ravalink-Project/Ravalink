@@ -13,6 +13,7 @@ use std::{
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_CONCURRENT_RESOLVES: usize = 2;
+const MAX_PCM_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct HttpSourceManager {
@@ -178,7 +179,7 @@ impl HttpSourceManager {
         let source_bytes = body;
         let decode_source = source_bytes.clone();
         let decode_extension = extension.clone();
-        let max_pcm_bytes = self.max_cache_bytes;
+        let max_pcm_bytes = MAX_PCM_FRAME_BYTES;
         let (frame_count, sample_rate) = tokio::task::spawn_blocking(move || {
             // Keep the slot occupied if the async request is cancelled while
             // this non-cancellable blocking decode is still running.
