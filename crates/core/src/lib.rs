@@ -585,7 +585,7 @@ impl AudioPlayerStore {
         session_id: &str,
         guild_id: &str,
         track: AudioTrack,
-        receiver: tokio::sync::mpsc::Receiver<PcmFrame>,
+        receiver: tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>,
     ) -> Result<(), AudioError> {
         let player = self.get_or_create(session_id, guild_id).await;
         let mut player = player.lock().await;

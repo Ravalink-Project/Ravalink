@@ -247,14 +247,22 @@ pub async fn decode_bytes_to_channel(
     bytes: Vec<u8>,
     extension: Option<String>,
     max_pcm_bytes: usize,
-    sender: tokio::sync::mpsc::Sender<PcmFrame>,
+    sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
 ) -> Result<(), AudioError> {
     tokio::task::spawn_blocking(move || {
-        decode_bytes_with(bytes, extension.as_deref(), max_pcm_bytes, |frame| {
+        let decoded = decode_bytes_with(bytes, extension.as_deref(), max_pcm_bytes, |frame| {
             sender
-                .blocking_send(frame)
+                .blocking_send(Ok(frame))
                 .map_err(|_| AudioError::invalid("PCM consumer closed the decode channel"))
-        })
+        });
+        if let Err(error) = decoded {
+            let _ = sender.blocking_send(Err(AudioError::invalid(format!(
+                "audio decode failed: {}",
+                error.message
+            ))));
+            return Err(error);
+        }
+        Ok(())
     })
     .await
     .map_err(|error| AudioError::invalid(format!("audio decoder task failed: {error}")))?
@@ -549,7 +557,7 @@ pub struct NativePlayer {
     end_time_ms: Option<u64>,
     volume: u16,
     decoded_frames: Vec<PcmFrame>,
-    streamed_frames: Option<tokio::sync::mpsc::Receiver<PcmFrame>>,
+    streamed_frames: Option<tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>>,
     next_frame_index: usize,
     processor: DspProcessor,
     voice_packetizer: VoicePcmPacketizer,
@@ -632,7 +640,7 @@ impl NativePlayer {
     pub fn load_streamed_track(
         &mut self,
         track: AudioTrack,
-        receiver: tokio::sync::mpsc::Receiver<PcmFrame>,
+        receiver: tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>,
     ) -> Result<(), AudioError> {
         self.start(track)?;
         self.streamed_frames = Some(receiver);
@@ -717,12 +725,20 @@ impl NativePlayer {
             .map(|receiver| receiver.try_recv())
         {
             match result {
-                Ok(frame) => {
+                Ok(Ok(frame)) => {
                     let processed = self.process_frame(frame)?;
                     if self.track.is_none() {
                         self.streamed_frames = None;
                     }
                     return Ok(processed);
+                }
+                Ok(Err(error)) => {
+                    self.streamed_frames = None;
+                    self.track = None;
+                    self.paused = false;
+                    self.position_ms = 0;
+                    self.voice_packetizer.clear();
+                    return Err(error);
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return Ok(None),
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
@@ -1313,11 +1329,11 @@ mod streamed_queue_tests {
         assert!(player.next_frame().unwrap().is_none());
 
         sender
-            .send(PcmFrame {
+            .send(Ok(PcmFrame {
                 samples: vec![0.1, -0.1],
                 channels: 2,
                 sample_rate: 48_000,
-            })
+            }))
             .await
             .unwrap();
         assert!(player.next_frame().unwrap().is_some());

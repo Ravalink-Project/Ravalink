@@ -689,7 +689,7 @@ async fn update_player(
             }
             tokio::spawn(async move {
                 for frame in frames {
-                    if pcm_sender.send(frame).await.is_err() {
+                    if pcm_sender.send(Ok(frame)).await.is_err() {
                         break;
                     }
                 }
@@ -1046,7 +1046,12 @@ async fn run_voice_audio_loop(
                         }
                         Ok(None) => {}
                         Err(error) => {
-                            warn!(%error, %guild_id, "Failed to encode Discord voice packet");
+                            let (cause, log_message) = if error.message.starts_with("audio decode failed:") {
+                                ("AudioDecodeError", "Failed to decode audio track")
+                            } else {
+                                ("AudioEncodingError", "Failed to encode Discord voice packet")
+                            };
+                            warn!(%error, %guild_id, "{log_message}");
                             if let Some(encoded) = state
                                 .players
                                 .get(session_id, guild_id)
@@ -1059,7 +1064,7 @@ async fn run_voice_audio_loop(
                                     guild_id,
                                     encoded,
                                     &error.message,
-                                    "AudioEncodingError",
+                                    cause,
                                 );
                             }
                             state.audio_players.stop(session_id, guild_id).await;
