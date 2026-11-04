@@ -175,9 +175,9 @@ struct PlayerUpdateQuery {
 }
 
 fn has_http_scheme(identifier: &str) -> bool {
-    identifier
-        .split_once(':')
-        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+    identifier.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+    })
 }
 
 type PlayerFieldValidator = (&'static str, fn(&serde_json::Value) -> bool);
@@ -1871,7 +1871,10 @@ mod server_api_tests {
             "HTTP://cdn.example/audio.mp3",
             "HtTpS://cdn.example/audio.mp3",
         ] {
-            assert!(has_http_scheme(identifier), "expected HTTP scheme: {identifier}");
+            assert!(
+                has_http_scheme(identifier),
+                "expected HTTP scheme: {identifier}"
+            );
         }
         for identifier in [
             "ftp://cdn.example/audio.mp3",
@@ -1880,7 +1883,10 @@ mod server_api_tests {
             "youtube:track-id",
             "not a URL",
         ] {
-            assert!(!has_http_scheme(identifier), "unexpected HTTP scheme: {identifier}");
+            assert!(
+                !has_http_scheme(identifier),
+                "unexpected HTTP scheme: {identifier}"
+            );
         }
     }
 
