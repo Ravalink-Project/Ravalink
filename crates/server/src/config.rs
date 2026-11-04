@@ -46,6 +46,8 @@ pub struct ExternalPluginConfig {
     pub args: Vec<String>,
     #[serde(default)]
     pub environment: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub config: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -91,6 +91,7 @@ pub struct ProcessPlugin {
     program: PathBuf,
     args: Vec<String>,
     environment: HashMap<String, String>,
+    config: Value,
     process_slots: Arc<tokio::sync::Semaphore>,
 }
 
@@ -108,10 +109,16 @@ impl ProcessPlugin {
             program: program.into(),
             args,
             environment,
+            config: Value::Object(Default::default()),
             process_slots: Arc::new(tokio::sync::Semaphore::new(
                 MAX_CONCURRENT_PROCESS_PLUGIN_CALLS,
             )),
         }
+    }
+
+    pub fn with_config(mut self, config: Value) -> Self {
+        self.config = config;
+        self
     }
 }
 
@@ -157,6 +164,7 @@ impl RavaLinkPlugin for ProcessPlugin {
         let request = serde_json::json!({
             "protocolVersion": 1,
             "identifier": identifier,
+            "config": self.config,
         });
         let mut stdin = child.stdin.take().ok_or_else(|| {
             PluginError::new(
@@ -228,6 +236,8 @@ impl RavaLinkPlugin for ProcessPlugin {
 /// Manifest for a community plugin installed in the plugins directory.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginManifest {
+    #[serde(default = "default_plugin_api_version")]
+    pub api_version: u32,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -239,6 +249,12 @@ pub struct PluginManifest {
     pub args: Vec<String>,
     #[serde(default)]
     pub environment: HashMap<String, String>,
+    #[serde(default)]
+    pub config: Value,
+}
+
+fn default_plugin_api_version() -> u32 {
+    1
 }
 
 pub type SharedPlugin = Arc<dyn RavaLinkPlugin>;
@@ -370,6 +386,12 @@ impl PluginRegistry {
             })?;
             let name = manifest.name.trim();
             let prefix = manifest.identifier_prefix.trim();
+            if manifest.api_version != 1 {
+                return Err(PluginError::new(
+                    name,
+                    format!("unsupported plugin API version {}", manifest.api_version),
+                ));
+            }
             if name.is_empty()
                 || manifest.version.trim().is_empty()
                 || manifest.description.trim().is_empty()
@@ -427,7 +449,8 @@ impl PluginRegistry {
                 program,
                 manifest.args,
                 manifest.environment,
-            ));
+            )
+            .with_config(manifest.config));
             loaded += 1;
         }
         Ok(loaded)

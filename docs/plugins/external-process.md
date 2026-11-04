@@ -6,7 +6,7 @@ allocator and dependency-version differences can make a Rust ABI unsafe.
 
 ## Installation and configuration
 
-Community plugins can be installed like Lavalink v4 plugins: place one plugin folder per extension inside `plugins/` (or set `plugin_directory` in the root configuration). Each folder contains a `ravalink-plugin.toml` manifest and its executable. RavaLink discovers these folders at startup in deterministic name order. The executable path in the manifest may be relative to its plugin folder.
+Community plugins use a Lavalink-inspired installation model: place one plugin folder per extension inside `plugins/` (or set `plugin_directory` in the root configuration). This is a native Rust extension system, not a Java/JAR-compatible Lavalink plugin class loader. Each folder contains a `ravalink-plugin.toml` manifest and its executable. RavaLink discovers these folders at startup in deterministic name order. The executable path in the manifest may be relative to its plugin folder.
 
 Example `plugins/community-source/ravalink-plugin.toml`:
 
@@ -16,8 +16,12 @@ version = "1.0.0"
 description = "Community source integration"
 capabilities = ["track", "playlist", "search"]
 identifier_prefix = "community:"
+api_version = 1
 program = "bin/community-source"
 args = ["--stdio"]
+
+[config]
+region = "eu"
 
 [environment]
 API_TOKEN = "provided-by-the-deployment"
@@ -55,7 +59,7 @@ one JSON request to stdin, closes stdin, reads stdout, and waits for the process
 {"protocolVersion":1,"identifier":"community:some-track"}
 ```
 
-The executable must write exactly one JSON response to stdout. It may return
+The executable must write exactly one JSON response to stdout. The request also includes the plugin-specific `config` table from the manifest. It may return
 `null` when it does not handle the identifier, or a Lavalink-compatible result:
 
 ```json
@@ -65,8 +69,7 @@ The executable must write exactly one JSON response to stdout. It may return
 Supported `loadType` values are `track`, `playlist`, and `search`. Track
 playback integrations must include a complete Lavalink track object and a playable
 `pluginInfo.streamUrl` pointing to a supported direct HTTP(S) audio resource.
-RavaLink applies its normal public-IP, redirect, download-size, format and decoder
-checks to that URL.
+RavaLink applies its public-IP, redirect, format and decoder checks to that URL.
 
 The host accepts at most 4 MiB of stdout per invocation, runs at most two child
 processes concurrently per extension, and applies a 30-second wall-clock timeout

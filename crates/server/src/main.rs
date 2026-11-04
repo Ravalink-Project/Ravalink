@@ -224,7 +224,8 @@ fn built_in_plugins(
             plugin.program.clone(),
             plugin.args.clone(),
             plugin.environment.clone(),
-        ));
+        )
+        .with_config(plugin.config.clone()));
     }
     let loaded = plugins
         .load_directory(plugin_directory)
