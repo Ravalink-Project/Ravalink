@@ -457,15 +457,10 @@ impl LavaSearchPlugin {
 impl RavaLinkPlugin for LavaSearchPlugin {
     fn descriptor(&self) -> PluginDescriptor {
         PluginDescriptor {
-            name: "lavasearch",
-            version: env!("CARGO_PKG_VERSION"),
-            description: "Advanced search for tracks, albums, artists and playlists",
-            capabilities: &[
-                "track-search",
-                "album-search",
-                "artist-search",
-                "playlist-search",
-            ],
+            name: "lavasearch".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "Advanced search for tracks, albums, artists and playlists".into(),
+            capabilities: vec!["track-search".into(), "album-search".into(), "artist-search".into(), "playlist-search".into()],
         }
     }
 

@@ -231,10 +231,10 @@ impl YouTubePlugin {
 impl RavaLinkPlugin for YouTubePlugin {
     fn descriptor(&self) -> PluginDescriptor {
         PluginDescriptor {
-            name: "youtube",
-            version: env!("CARGO_PKG_VERSION"),
-            description: "YouTube video, playlist and search source",
-            capabilities: &["video", "playlist", "search", "music-search"],
+            name: "youtube".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "YouTube video, playlist and search source".into(),
+            capabilities: vec!["video".into(), "playlist".into(), "search".into(), "music-search".into()],
         }
     }
 

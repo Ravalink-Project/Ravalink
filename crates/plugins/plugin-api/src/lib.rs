@@ -5,13 +5,17 @@
 
 use async_trait::async_trait;
 use ravalink_protocol::PluginInfo;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{fmt, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::Command;
 
 /// Maximum default wall-clock time allowed for one plugin resolution.
 pub const DEFAULT_PLUGIN_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PluginLoadType {
     Track,
     Playlist,
@@ -28,7 +32,8 @@ impl PluginLoadType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginLoadResult {
     pub load_type: PluginLoadType,
     pub data: Value,
@@ -42,17 +47,17 @@ impl PluginLoadResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginDescriptor {
-    pub name: &'static str,
-    pub version: &'static str,
-    pub description: &'static str,
-    pub capabilities: &'static [&'static str],
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub capabilities: Vec<String>,
 }
 
 impl PluginDescriptor {
     pub fn info(&self) -> PluginInfo {
         PluginInfo {
-            name: self.name.to_owned(),
-            version: self.version.to_owned(),
+            name: self.name.clone(),
+            version: self.version.clone(),
         }
     }
 }
@@ -70,6 +75,121 @@ pub trait RavaLinkPlugin: Send + Sync {
         _identifier: &str,
     ) -> Result<Option<PluginLoadResult>, PluginError> {
         Ok(None)
+    }
+}
+
+/// Maximum JSON response accepted from an out-of-process extension.
+pub const MAX_PROCESS_PLUGIN_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+
+/// A standalone Rust extension hosted as a short-lived child process.
+#[derive(Debug, Clone)]
+pub struct ProcessPlugin {
+    descriptor: PluginDescriptor,
+    identifier_prefix: String,
+    program: PathBuf,
+    args: Vec<String>,
+    environment: HashMap<String, String>,
+}
+
+impl ProcessPlugin {
+    pub fn new(
+        descriptor: PluginDescriptor,
+        identifier_prefix: impl Into<String>,
+        program: impl Into<PathBuf>,
+        args: Vec<String>,
+        environment: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            descriptor,
+            identifier_prefix: identifier_prefix.into(),
+            program: program.into(),
+            args,
+            environment,
+        }
+    }
+}
+
+#[async_trait]
+impl RavaLinkPlugin for ProcessPlugin {
+    fn descriptor(&self) -> PluginDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn supports_identifier(&self, identifier: &str) -> bool {
+        identifier.starts_with(&self.identifier_prefix)
+    }
+
+    async fn load_tracks(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<PluginLoadResult>, PluginError> {
+        let mut child = Command::new(&self.program)
+            .args(&self.args)
+            .env_clear()
+            .env("RAVALINK_PLUGIN_PROTOCOL", "1")
+            .envs(&self.environment)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|error| PluginError::new(
+                self.descriptor.name.clone(),
+                format!("cannot start extension process: {error}"),
+            ))?;
+
+        let request = serde_json::json!({
+            "protocolVersion": 1,
+            "identifier": identifier,
+        });
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            PluginError::new(self.descriptor.name.clone(), "extension stdin was unavailable")
+        })?;
+        stdin.write_all(request.to_string().as_bytes()).await.map_err(|error| {
+            PluginError::new(
+                self.descriptor.name.clone(),
+                format!("cannot write extension request: {error}"),
+            )
+        })?;
+        drop(stdin);
+
+        let mut stdout = child.stdout.take().ok_or_else(|| {
+            PluginError::new(self.descriptor.name.clone(), "extension stdout was unavailable")
+        })?;
+        let mut output = Vec::new();
+        stdout
+            .take((MAX_PROCESS_PLUGIN_OUTPUT_BYTES + 1) as u64)
+            .read_to_end(&mut output)
+            .await
+            .map_err(|error| PluginError::new(
+                self.descriptor.name.clone(),
+                format!("cannot read extension response: {error}"),
+            ))?;
+        if output.len() > MAX_PROCESS_PLUGIN_OUTPUT_BYTES {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(PluginError::new(
+                self.descriptor.name.clone(),
+                format!("extension response exceeds the {} byte limit", MAX_PROCESS_PLUGIN_OUTPUT_BYTES),
+            ));
+        }
+
+        let status = child.wait().await.map_err(|error| PluginError::new(
+            self.descriptor.name.clone(),
+            format!("cannot wait for extension process: {error}"),
+        ))?;
+        if !status.success() {
+            return Err(PluginError::new(
+                self.descriptor.name.clone(),
+                format!("extension process exited with status {status}"),
+            ));
+        }
+        serde_json::from_slice::<Option<PluginLoadResult>>(&output).map_err(|error| {
+            PluginError::new(
+                self.descriptor.name.clone(),
+                format!("extension returned invalid JSON: {error}"),
+            )
+        })
     }
 }
 
@@ -197,10 +317,10 @@ mod tests {
     impl RavaLinkPlugin for TestPlugin {
         fn descriptor(&self) -> PluginDescriptor {
             PluginDescriptor {
-                name: "test",
-                version: "0.1.0",
-                description: "test plugin",
-                capabilities: &["search"],
+                name: "test".into(),
+                version: "0.1.0".into(),
+                description: "test plugin".into(),
+                capabilities: vec!["search".into()],
             }
         }
 
@@ -225,10 +345,10 @@ mod tests {
     impl RavaLinkPlugin for SlowPlugin {
         fn descriptor(&self) -> PluginDescriptor {
             PluginDescriptor {
-                name: "slow",
-                version: "0.1.0",
-                description: "deliberately slow test plugin",
-                capabilities: &["search"],
+                name: "slow".into(),
+                version: "0.1.0".into(),
+                description: "deliberately slow test plugin".into(),
+                capabilities: vec!["search".into()],
             }
         }
 
@@ -257,6 +377,26 @@ mod tests {
 
         assert_eq!(error.plugin, "slow");
         assert!(error.message.contains("timed out"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_plugin_uses_the_versioned_json_protocol() {
+        let plugin = ProcessPlugin::new(
+            PluginDescriptor {
+                name: "external-test".into(),
+                version: "1.0.0".into(),
+                description: "test process extension".into(),
+                capabilities: vec!["search".into()],
+            },
+            "external:",
+            "/usr/bin/printf",
+            vec![r#"{"loadType":"search","data":{"query":"ok"}}"#.into()],
+            HashMap::new(),
+        );
+        let loaded = plugin.load_tracks("external:hello").await.unwrap().unwrap();
+        assert_eq!(loaded.load_type, PluginLoadType::Search);
+        assert_eq!(loaded.data["query"], "ok");
     }
 
     #[tokio::test]

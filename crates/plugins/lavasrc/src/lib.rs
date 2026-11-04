@@ -956,18 +956,10 @@ fn music_match_score(metadata: &ExternalTrack, candidate: &Track) -> f32 {
 impl RavaLinkPlugin for LavaSrcPlugin {
     fn descriptor(&self) -> PluginDescriptor {
         PluginDescriptor {
-            name: "lavasrc",
-            version: env!("CARGO_PKG_VERSION"),
-            description: "Spotify, Apple Music and Deezer source integration",
-            capabilities: &[
-                "spotify",
-                "apple-music",
-                "deezer",
-                "track",
-                "album",
-                "artist",
-                "playlist",
-            ],
+            name: "lavasrc".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "Spotify, Apple Music and Deezer source integration".into(),
+            capabilities: vec!["spotify".into(), "apple-music".into(), "deezer".into(), "track".into(), "album".into(), "artist".into(), "playlist".into()],
         }
     }
 
