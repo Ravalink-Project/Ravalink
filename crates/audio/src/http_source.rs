@@ -283,41 +283,6 @@ impl HttpSourceManager {
             .map_err(|error| AudioError::invalid(format!("cannot build HTTP client: {error}")))
     }
 
-    async fn streaming_client(&self, url: &reqwest::Url) -> Result<reqwest::Client, AudioError> {
-        let host = url
-            .host_str()
-            .ok_or_else(|| AudioError::invalid("HTTP source URL has no host"))?;
-        let port = url
-            .port_or_known_default()
-            .ok_or_else(|| AudioError::invalid("HTTP source URL has no known port"))?;
-        let addresses = match host.parse::<IpAddr>() {
-            Ok(address) => vec![SocketAddr::new(address, port)],
-            Err(_) => tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::net::lookup_host((host, port)),
-            )
-            .await
-            .map_err(|_| AudioError::invalid("HTTP source DNS lookup timed out"))?
-            .map_err(|error| {
-                AudioError::invalid(format!("cannot resolve HTTP source host: {error}"))
-            })?
-            .collect::<Vec<_>>(),
-        };
-        if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
-            return Err(AudioError::invalid(
-                "HTTP source host resolves to a private or reserved network address",
-            ));
-        }
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .user_agent("RavaLink/0.1 native-audio")
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .resolve_to_addrs(host, &addresses)
-            .build()
-            .map_err(|error| AudioError::invalid(format!("cannot build HTTP client: {error}")))
-    }
-
     /// Resolve and decode a direct HTTP(S) media URL.
     ///
     /// This initial adapter buffers the source before decoding. It is intended
