@@ -1856,9 +1856,7 @@ mod server_api_tests {
             .await
             .unwrap();
         assert_eq!(store.bytes_used().await, 12);
-        store
-            .restore(first.clone(), &replacement, previous)
-            .await;
+        store.restore(first.clone(), &replacement, previous).await;
         assert_eq!(store.bytes_used().await, 8);
         assert!(store.replace(second, source(9)).await.is_err());
         store.remove(&first).await;
