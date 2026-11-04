@@ -984,6 +984,7 @@ mod tests {
             sender,
         ));
         let frame = receiver.recv().await.unwrap();
+        let frame = frame.unwrap();
         assert_eq!(frame.channels, 2);
         assert_eq!(frame.sample_rate, 48_000);
         decode.await.unwrap().unwrap();
@@ -1341,6 +1342,28 @@ mod streamed_queue_tests {
 
         assert!(player.next_frame().unwrap().is_none());
         assert_eq!(player.take_completed_track(), Some(track));
+    }
+
+    #[tokio::test]
+    async fn native_player_propagates_decoder_errors_without_finishing_track() {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let mut player = NativePlayer::default();
+        let track = AudioTrack {
+            identifier: "broken-stream".into(),
+            title: "Broken stream".into(),
+            author: "Test".into(),
+            duration_ms: None,
+            is_stream: false,
+        };
+        player.load_streamed_track(track, receiver).unwrap();
+        sender
+            .send(Err(AudioError::invalid("audio decode failed: malformed media")))
+            .await
+            .unwrap();
+
+        let error = player.next_frame().unwrap_err();
+        assert!(error.message.contains("malformed media"));
+        assert!(player.take_completed_track().is_none());
     }
 
     #[tokio::test]
