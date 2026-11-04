@@ -251,7 +251,7 @@ async fn run_voice_gateway_socket(
     endpoint: String,
 ) {
     loop {
-        let heartbeat_timeout = heartbeat.period().saturating_mul(2);
+        let mut heartbeat_timeout = heartbeat.period().saturating_mul(2);
     let mut last_heartbeat_ack = tokio::time::Instant::now();
     loop {
         let mut connection_lost = false;
@@ -428,7 +428,9 @@ async fn run_voice_gateway_socket(
             match resume_voice_gateway(&endpoint, &mut machine, &dave, &mut shutdown).await {
                 Ok((resumed_socket, resumed_heartbeat)) => {
                     socket = resumed_socket;
+                    heartbeat_timeout = resumed_heartbeat.period().saturating_mul(2);
                     heartbeat = resumed_heartbeat;
+                    last_heartbeat_ack = tokio::time::Instant::now();
                     tracing::info!("Discord voice websocket session resumed");
                     resumed = true;
                     break;
