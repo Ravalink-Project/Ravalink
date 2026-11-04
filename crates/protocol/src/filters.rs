@@ -204,14 +204,9 @@ mod tests {
 
     #[test]
     fn preserves_unknown_filter_keys_as_plugin_filters() {
-        let filters: Filters = serde_json::from_str(
-            r#"{"customPlugin":{"strength":0.75}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            filters.plugin_filters["customPlugin"]["strength"],
-            0.75
-        );
+        let filters: Filters =
+            serde_json::from_str(r#"{"customPlugin":{"strength":0.75}}"#).unwrap();
+        assert_eq!(filters.plugin_filters["customPlugin"]["strength"], 0.75);
         assert_eq!(
             serde_json::to_value(filters).unwrap()["customPlugin"]["strength"],
             0.75
