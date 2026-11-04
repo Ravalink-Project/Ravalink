@@ -155,7 +155,7 @@ pub fn decode_bytes_limited(
 /// discard packets can process tracks longer than that limit. Returning an
 /// error stops demuxing/decoding immediately and drops decoder state.
 pub fn decode_bytes_with<F>(
-    bytes: Vec<u8>,
+    bytes: impl Into<std::sync::Arc<[u8]>>,
     extension: Option<&str>,
     max_pcm_bytes: usize,
     mut on_frame: F,
@@ -173,7 +173,10 @@ where
     if let Some(extension) = extension {
         hint.with_extension(extension);
     }
-    let source = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+    let source = MediaSourceStream::new(
+        Box::new(Cursor::new(bytes.into())),
+        Default::default(),
+    );
     let probed = symphonia::default::get_probe()
         .format(
             &hint,
@@ -259,14 +262,21 @@ pub async fn decode_bytes_to_channel(
     max_pcm_bytes: usize,
     sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
 ) -> Result<(), AudioError> {
-    decode_bytes_to_channel_at(bytes, extension, max_pcm_bytes, 0, sender).await
+    decode_bytes_to_channel_at(
+        std::sync::Arc::from(bytes),
+        extension,
+        max_pcm_bytes,
+        0,
+        sender,
+    )
+    .await
 }
 
 /// Decode a buffered source into a bounded channel, discarding PCM before the
 /// requested position. This re-decodes from the beginning of the compressed
 /// source, but does not retain the decoded prefix in memory.
 pub async fn decode_bytes_to_channel_at(
-    bytes: Vec<u8>,
+    bytes: std::sync::Arc<[u8]>,
     extension: Option<String>,
     max_pcm_bytes: usize,
     position_ms: u64,
@@ -1153,7 +1163,7 @@ mod tests {
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(128);
         let decode = tokio::spawn(decode_bytes_to_channel_at(
-            wav,
+            wav.into(),
             Some("wav".to_owned()),
             200_000,
             500,

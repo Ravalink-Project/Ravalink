@@ -31,7 +31,7 @@ struct CacheState {
 }
 
 struct CacheEntry {
-    source: Vec<u8>,
+    source: Arc<[u8]>,
     extension: Option<String>,
     max_pcm_bytes: usize,
     bytes: usize,
@@ -40,7 +40,7 @@ struct CacheEntry {
 
 #[derive(Debug, Clone)]
 pub struct CachedHttpSource {
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     pub extension: Option<String>,
     pub max_pcm_bytes: usize,
 }
@@ -176,8 +176,8 @@ impl HttpSourceManager {
             )));
         }
         // Validate and measure off the async executor, discarding each PCM packet.
-        let source_bytes = body;
-        let decode_source = source_bytes.clone();
+        let source_bytes: Arc<[u8]> = body.into();
+        let decode_source = Arc::clone(&source_bytes);
         let decode_extension = extension.clone();
         let max_pcm_bytes = MAX_PCM_FRAME_BYTES;
         let (frame_count, sample_rate) = tokio::task::spawn_blocking(move || {
@@ -291,7 +291,7 @@ impl HttpSourceManager {
     fn insert_cache(
         &self,
         key: String,
-        source: Vec<u8>,
+        source: Arc<[u8]>,
         extension: Option<String>,
         max_pcm_bytes: usize,
     ) -> Result<(), AudioError> {
@@ -447,10 +447,10 @@ mod tests {
     fn compressed_source_cache_evicts_oldest_entries_to_respect_its_limit() {
         let manager = HttpSourceManager::new(16);
         manager
-            .insert_cache("first".into(), vec![1; 8], Some("mp3".into()), 64)
+            .insert_cache("first".into(), Arc::from(vec![1; 8]), Some("mp3".into()), 64)
             .unwrap();
         manager
-            .insert_cache("second".into(), vec![2; 12], Some("mp3".into()), 64)
+            .insert_cache("second".into(), Arc::from(vec![2; 12]), Some("mp3".into()), 64)
             .unwrap();
 
         assert_eq!(manager.cached_bytes().unwrap(), 12);
@@ -466,10 +466,10 @@ mod tests {
     fn rejects_entries_larger_than_the_entire_cache_without_evicting_or_caching_them() {
         let manager = HttpSourceManager::new(16);
         manager
-            .insert_cache("kept".into(), vec![1; 8], Some("mp3".into()), 64)
+            .insert_cache("kept".into(), Arc::from(vec![1; 8]), Some("mp3".into()), 64)
             .unwrap();
         let error = manager
-            .insert_cache("oversized".into(), vec![2; 17], Some("mp3".into()), 64)
+            .insert_cache("oversized".into(), Arc::from(vec![2; 17]), Some("mp3".into()), 64)
             .unwrap_err();
 
         assert!(
@@ -487,9 +487,11 @@ mod tests {
     fn taking_a_compressed_source_removes_the_cache_entry() {
         let manager = HttpSourceManager::new(64);
         manager
-            .insert_cache("track".into(), vec![1; 8], Some("mp3".into()), 64)
+            .insert_cache("track".into(), Arc::from(vec![1; 8]), Some("mp3".into()), 64)
             .unwrap();
-        assert!(manager.take_source("track").unwrap().is_some());
+        let source = manager.take_source("track").unwrap().unwrap();
+        let clone = source.clone();
+        assert!(Arc::ptr_eq(&source.bytes, &clone.bytes));
         assert!(manager.take_source("track").unwrap().is_none());
         assert_eq!(manager.cached_bytes().unwrap(), 0);
     }

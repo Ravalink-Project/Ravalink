@@ -1860,7 +1860,7 @@ mod server_api_tests {
                 .insert(
                     ("session".into(), "guild".into()),
                     CachedHttpSource {
-                        bytes: vec![1, 2, 3],
+                        bytes: Arc::from(vec![1, 2, 3]),
                         extension: Some("wav".into()),
                         max_pcm_bytes: 64,
                     },
