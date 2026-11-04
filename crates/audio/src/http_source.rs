@@ -89,6 +89,11 @@ impl HttpSourceManager {
                 "only HTTP and HTTPS media URLs are supported",
             ));
         }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(AudioError::invalid(
+                "HTTP source URLs must not embed credentials",
+            ));
+        }
 
         let host = url
             .host_str()
@@ -98,12 +103,16 @@ impl HttpSourceManager {
             .ok_or_else(|| AudioError::invalid("HTTP source URL has no known port"))?;
         let addresses = match host.parse::<IpAddr>() {
             Ok(address) => vec![SocketAddr::new(address, port)],
-            Err(_) => tokio::net::lookup_host((host, port))
-                .await
-                .map_err(|error| {
-                    AudioError::invalid(format!("cannot resolve HTTP source host: {error}"))
-                })?
-                .collect::<Vec<_>>(),
+            Err(_) => tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::net::lookup_host((host, port)),
+            )
+            .await
+            .map_err(|_| AudioError::invalid("HTTP source DNS lookup timed out"))?
+            .map_err(|error| {
+                AudioError::invalid(format!("cannot resolve HTTP source host: {error}"))
+            })?
+            .collect::<Vec<_>>(),
         };
         if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
             return Err(AudioError::invalid(
@@ -431,6 +440,16 @@ fn media_title(url: &reqwest::Url) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rejects_embedded_http_credentials_before_network_access() {
+        let manager = HttpSourceManager::default();
+        let error = manager
+            .resolve("https://user:secret@example.com/audio.mp3")
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("must not embed credentials"));
+    }
 
     #[test]
     fn cloned_http_source_managers_share_a_bounded_resolution_semaphore() {
