@@ -520,6 +520,104 @@ fn url_encode(value: &str) -> String {
 mod tests {
     use super::*;
 
+    async fn mock_api_response(status: &'static str, body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = stream.read(&mut request).await;
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn resolves_search_results_from_a_provider_response() {
+        let base = mock_api_response("200 OK", "[]").await;
+        let plugin = YouTubePlugin::new(base);
+
+        let result = plugin.load_tracks("ytsearch:ambient music").await.unwrap().unwrap();
+
+        assert_eq!(result.load_type, PluginLoadType::Search);
+        assert_eq!(result.data, json!([]));
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_provider_json() {
+        let base = mock_api_response("200 OK", "{not-json").await;
+        let plugin = YouTubePlugin::new(base);
+
+        let error = plugin.request_json("/api/v1/search?q=broken").await.unwrap_err();
+
+        assert!(error.message.contains("invalid JSON response"));
+    }
+
+    #[tokio::test]
+    async fn fails_over_when_a_provider_instance_is_unavailable() {
+        let unavailable = mock_api_response("503 Service Unavailable", "upstream unavailable").await;
+        let healthy = mock_api_response("200 OK", "[]").await;
+        let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
+
+        let result = plugin.load_tracks("ytsearch:ambient music").await.unwrap().unwrap();
+
+        assert_eq!(result.load_type, PluginLoadType::Search);
+        assert_eq!(result.data, json!([]));
+    }
+
+    #[tokio::test]
+    async fn resolves_video_metadata_and_a_playable_audio_url() {
+        let base = mock_api_response(
+            "200 OK",
+            r#"{
+                "videoId": "dQw4w9WgXcQ",
+                "title": "Example track",
+                "author": "Example artist",
+                "lengthSeconds": 210,
+                "adaptiveFormats": [{
+                    "type": "audio/webm; codecs=opus",
+                    "bitrate": 160000,
+                    "url": "https://media.example/audio.webm"
+                }]
+            }"#,
+        )
+        .await;
+        let plugin = YouTubePlugin::new(base);
+
+        let track = plugin.resolve_video("dQw4w9WgXcQ").await.unwrap();
+
+        assert_eq!(track.info.title, "Example track");
+        assert_eq!(track.info.author, "Example artist");
+        assert_eq!(track.info.length, 210_000);
+        assert_eq!(
+            track.plugin_info["streamUrl"],
+            "https://media.example/audio.webm"
+        );
+        assert!(!track.encoded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejects_provider_tracks_without_a_playable_audio_format() {
+        let base = mock_api_response(
+            "200 OK",
+            r#"{"videoId":"dQw4w9WgXcQ","title":"Example","adaptiveFormats":[]}"#,
+        )
+        .await;
+        let plugin = YouTubePlugin::new(base);
+
+        let error = plugin.resolve_video("dQw4w9WgXcQ").await.unwrap_err();
+
+        assert!(error.message.contains("no playable audio format"));
+    }
+
     #[test]
     fn accepts_a_comma_separated_invidious_failover_list() {
         let plugin = YouTubePlugin::new(
