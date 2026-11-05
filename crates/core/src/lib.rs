@@ -180,7 +180,10 @@ mod tests {
     async fn can_resume_checks_user_and_deadline_without_consuming_session() {
         let store = SessionStore::default();
         let session = store.create(123, None).await;
-        store.update(&session.id, Some(true), Some(120)).await.unwrap();
+        store
+            .update(&session.id, Some(true), Some(120))
+            .await
+            .unwrap();
         store.disconnect(&session.id).await;
 
         assert!(store.can_resume(&session.id, 123).await);
