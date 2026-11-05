@@ -28,9 +28,10 @@ pub struct Filters {
     pub channel_mix: Omissible<Option<ChannelMix>>,
     #[serde(default, skip_serializing_if = "Omissible::is_omitted")]
     pub low_pass: Omissible<Option<LowPass>>,
-    /// Filter keys supplied by Lavalink plugins. Native playback rejects these
-    /// until a registered filter implementation can consume them.
-    #[serde(flatten)]
+    /// Plugin filter configurations use Lavalink v4's nested pluginFilters map.
+    /// Native playback rejects individual plugin filters until a registered
+    /// handler can consume them.
+    #[serde(default, rename = "pluginFilters", skip_serializing_if = "HashMap::is_empty")]
     pub plugin_filters: HashMap<String, Value>,
 }
 
@@ -256,11 +257,13 @@ mod tests {
 
     #[test]
     fn preserves_unknown_filter_keys_as_plugin_filters() {
-        let filters: Filters =
-            serde_json::from_str(r#"{"customPlugin":{"strength":0.75}}"#).unwrap();
+        let filters: Filters = serde_json::from_str(
+            r#"{"pluginFilters":{"customPlugin":{"strength":0.75}}}"#,
+        )
+        .unwrap();
         assert_eq!(filters.plugin_filters["customPlugin"]["strength"], 0.75);
         assert_eq!(
-            serde_json::to_value(filters).unwrap()["customPlugin"]["strength"],
+            serde_json::to_value(filters).unwrap()["pluginFilters"]["customPlugin"]["strength"],
             0.75
         );
     }
