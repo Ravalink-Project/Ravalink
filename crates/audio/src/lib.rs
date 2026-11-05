@@ -1625,50 +1625,65 @@ mod tests {
     }
 
     #[test]
-    fn native_player_timescale_speed_changes_output_duration() {
-        let mut player = NativePlayer::default();
-        player
-            .load_decoded_track(
-                AudioTrack {
-                    identifier: "timescale".into(),
-                    title: "Timescale".into(),
-                    author: "Test".into(),
-                    duration_ms: Some(1_000),
-                    is_stream: false,
-                },
-                (0..50)
-                    .map(|index| {
-                        let phase = index as f32 * 960.0;
-                        frame(
-                            (0..1_920)
-                                .map(|sample| ((phase + sample as f32) * 0.03).sin() * 0.2)
-                                .collect(),
-                            2,
-                        )
-                    })
-                    .collect(),
-            )
-            .unwrap();
+    fn native_player_timescale_keeps_speed_pitch_and_rate_independent() {
+        fn render_frames(speed: f64, pitch: f64, rate: f64) -> usize {
+            let mut player = NativePlayer::default();
+            player
+                .load_decoded_track(
+                    AudioTrack {
+                        identifier: "timescale".into(),
+                        title: "Timescale".into(),
+                        author: "Test".into(),
+                        duration_ms: Some(1_000),
+                        is_stream: false,
+                    },
+                    (0..50)
+                        .map(|index| {
+                            let phase = index as f32 * 960.0;
+                            frame(
+                                (0..1_920)
+                                    .map(|sample| ((phase + sample as f32) * 0.03).sin() * 0.2)
+                                    .collect(),
+                                2,
+                            )
+                        })
+                        .collect(),
+                )
+                .unwrap();
 
-        let mut filters = Filters::default();
-        filters.timescale = Omissible::Present(Some(ravalink_protocol::Timescale {
-            speed: 2.0,
-            pitch: 1.0,
-            rate: 1.0,
-        }));
-        player.set_filters(filters);
+            let mut filters = Filters::default();
+            filters.timescale = Omissible::Present(Some(ravalink_protocol::Timescale {
+                speed,
+                pitch,
+                rate,
+            }));
+            player.set_filters(filters);
 
-        let mut output_frames = 0;
-        while player.next_voice_frame().unwrap().is_some() {
-            output_frames += 1;
+            let mut output_frames = 0;
+            while player.next_voice_frame().unwrap().is_some() {
+                output_frames += 1;
+            }
+            assert_eq!(
+                player.take_completed_track().unwrap().identifier,
+                "timescale"
+            );
+            output_frames
         }
+
+        let original_duration = render_frames(1.0, 1.0, 1.0);
+        let faster = render_frames(2.0, 1.0, 1.0);
+        let higher_pitch = render_frames(1.0, 2.0, 1.0);
+        let faster_rate = render_frames(1.0, 1.0, 2.0);
+
+        assert!((45..=55).contains(&original_duration));
+        assert!((20..=30).contains(&faster));
         assert!(
-            (20..=30).contains(&output_frames),
-            "2x speed should produce about half the original 50 voice frames, got {output_frames}"
+            (45..=55).contains(&higher_pitch),
+            "pitch-only changes must preserve duration, got {higher_pitch} frames"
         );
-        assert_eq!(
-            player.take_completed_track().unwrap().identifier,
-            "timescale"
+        assert!(
+            (20..=30).contains(&faster_rate),
+            "rate changes both pitch and duration, got {faster_rate} frames"
         );
     }
 
