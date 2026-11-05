@@ -1038,14 +1038,13 @@ async fn update_player(
             .snapshot(&session_id, &guild_id)
             .await
             .is_some_and(|snapshot| snapshot.track.is_some());
-        if has_track_request || active_track {
-            if let Err(error) = state
+        if (has_track_request || active_track)
+            && let Err(error) = state
                 .audio_players
                 .set_end_time(&session_id, &guild_id, end_time)
                 .await
-            {
-                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
-            }
+        {
+            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
         }
     }
 
@@ -2252,7 +2251,7 @@ mod server_api_tests {
 
     #[tokio::test]
     async fn websocket_handshake_supports_optional_client_name_and_session_resume() {
-        use futures_util::{SinkExt, StreamExt};
+        use futures_util::StreamExt;
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
         let state = state();
