@@ -2292,6 +2292,37 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn update_player_user_data_only_patch_preserves_current_track() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        state
+            .players
+            .update(
+                &session.id,
+                "123456",
+                serde_json::json!({
+                    "track": {"encoded": "existing-track", "userData": {"old": true}}
+                }),
+            )
+            .await;
+
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "123456".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({"track": {"userData": {"new": true}}})),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(player["track"]["encoded"], "existing-track");
+        assert_eq!(player["track"]["userData"], serde_json::json!({"new": true}));
+    }
+
+    #[tokio::test]
     async fn update_player_accepts_timescale_and_positive_end_time() {
         let state = state();
         let session = state.sessions.create(123, None).await;
