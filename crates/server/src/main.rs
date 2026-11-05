@@ -1840,7 +1840,11 @@ async fn websocket(
         return (StatusCode::BAD_REQUEST, "Missing or invalid User-Id header").into_response();
     };
     let Some(client_name) = client_name_header(&headers) else {
-        return (StatusCode::BAD_REQUEST, "Missing or invalid Client-Name header").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Missing or invalid Client-Name header",
+        )
+            .into_response();
     };
     let requested_session = headers
         .get("session-id")
@@ -2300,7 +2304,8 @@ mod server_api_tests {
             "user-id",
             tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
         );
-        let missing_name_error = match tokio_tungstenite::connect_async(missing_name_request).await {
+        let missing_name_error = match tokio_tungstenite::connect_async(missing_name_request).await
+        {
             Err(error) => error,
             Ok((mut socket, _)) => {
                 let _ = socket.close(None).await;
@@ -2325,7 +2330,9 @@ mod server_api_tests {
         );
         request.headers_mut().insert(
             "client-name",
-            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("RavaLink-Contract-Test/1.0"),
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static(
+                "RavaLink-Contract-Test/1.0",
+            ),
         );
 
         let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
