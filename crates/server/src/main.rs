@@ -2131,6 +2131,94 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn session_update_returns_effective_resume_configuration() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+
+        let response = update_session(
+            authorized_headers(),
+            State(state.clone()),
+            Path(session.id.clone()),
+            Json(SessionUpdate {
+                resuming: Some(true),
+                timeout: Some(120),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(info, serde_json::json!({"resuming": true, "timeout": 120}));
+
+        state.sessions.disconnect(&session.id).await;
+        assert!(state.sessions.get(&session.id).await.is_some());
+        assert!(state.sessions.resume(&session.id, 123).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn session_update_missing_session_uses_lavalink_error_shape() {
+        let response = update_session(
+            authorized_headers(),
+            State(state()),
+            Path("missing-session".into()),
+            Json(SessionUpdate::default()),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["status"], 404);
+        assert_eq!(error["message"], "Session not found");
+        assert_eq!(error["path"], "/v4/sessions/missing-session");
+    }
+
+    #[tokio::test]
+    async fn player_list_and_delete_follow_v4_lifecycle_responses() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        state
+            .players
+            .update(
+                &session.id,
+                "guild",
+                serde_json::json!({"volume": 75, "paused": false}),
+            )
+            .await;
+
+        let listed = get_players(
+            authorized_headers(),
+            State(state.clone()),
+            Path(session.id.clone()),
+        )
+        .await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let body = to_bytes(listed.into_body(), 16 * 1024).await.unwrap();
+        let players: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(players.as_array().unwrap().len(), 1);
+        assert_eq!(players[0]["guildId"], "guild");
+        assert_eq!(players[0]["volume"], 75);
+
+        let deleted = delete_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+        )
+        .await;
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+        assert!(state.players.get(&session.id, "guild").await.is_none());
+
+        let missing = get_player(
+            authorized_headers(),
+            State(state),
+            Path((session.id, "guild".into())),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn update_player_validates_filters_before_starting_or_replacing_a_track() {
         let state = state();
         let session = state.sessions.create(123, None).await;
