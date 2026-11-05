@@ -225,9 +225,7 @@ fn invalid_player_field(
             value.as_u64().is_some_and(|volume| volume <= 1_000)
         }),
         ("filters", |value: &serde_json::Value| value.is_object()),
-        ("voice", |value: &serde_json::Value| {
-            value.is_null() || value.is_object()
-        }),
+        ("voice", |value: &serde_json::Value| value.is_object()),
     ];
     if let Some(invalid) = field_validators.into_iter().find_map(|(field, valid)| {
         fields
@@ -822,17 +820,14 @@ async fn update_player(
             .is_some_and(|player| !player["track"].is_null());
 
     let voice_update = if let Some(voice) = fields.get("voice") {
-        if voice.is_null() {
-            Some(None)
-        } else {
-            let Some(voice) = voice.as_object() else {
-                return api_error(
-                    StatusCode::BAD_REQUEST,
-                    "Voice state must be an object or null",
-                    &path,
-                );
-            };
-            let (Some(token), Some(endpoint), Some(session_id), Some(channel_id)) = (
+        let Some(voice) = voice.as_object() else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "Voice state must be an object",
+                &path,
+            );
+        };
+        let (Some(token), Some(endpoint), Some(session_id), Some(channel_id)) = (
                 voice.get("token").and_then(serde_json::Value::as_str),
                 voice.get("endpoint").and_then(serde_json::Value::as_str),
                 voice.get("sessionId").and_then(serde_json::Value::as_str),
@@ -855,13 +850,12 @@ async fn update_player(
                     &path,
                 );
             }
-            Some(Some(DiscordVoiceState {
-                token: token.to_owned(),
-                endpoint: endpoint.to_owned(),
-                session_id: session_id.to_owned(),
-                channel_id: channel_id.to_owned(),
-            }))
-        }
+        Some(Some(DiscordVoiceState {
+            token: token.to_owned(),
+            endpoint: endpoint.to_owned(),
+            session_id: session_id.to_owned(),
+            channel_id: channel_id.to_owned(),
+        }))
     } else {
         None
     };
