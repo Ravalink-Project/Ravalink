@@ -2012,6 +2012,33 @@ mod server_api_tests {
         assert!(player["track"].is_null());
     }
 
+    #[tokio::test]
+    async fn out_of_range_volume_is_rejected_before_track_state_is_mutated() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({
+                "identifier": "https://example.invalid/audio.mp3",
+                "volume": 1001
+            })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            state.players.get(&session.id, "guild").await.is_none(),
+            "invalid volume must be rejected before a track/player is created"
+        );
+        assert!(
+            state.audio_players.snapshot(&session.id, "guild").await.is_none(),
+            "invalid volume must not create native playback state"
+        );
+    }
+
     #[test]
     fn http_source_scheme_detection_is_case_insensitive_and_exact() {
         for identifier in [
