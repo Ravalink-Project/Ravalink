@@ -7,6 +7,7 @@ binary="${1:-target/release/ravalink}"
 port="${RAVALINK_SMOKE_PORT:-23391}"
 password="ravalink-smoke-test-password"
 log_file="$(mktemp)"
+tmpdir="$(mktemp -d)"
 pid=""
 
 cleanup() {
@@ -15,6 +16,7 @@ cleanup() {
     wait "$pid" 2>/dev/null || true
   fi
   rm -f "$log_file"
+  rm -rf "$tmpdir"
 }
 trap cleanup EXIT
 
