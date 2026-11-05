@@ -576,7 +576,11 @@ mod tests {
         let healthy = mock_api_response("200 OK", "[]").await;
         let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
 
-        let result = plugin.load_tracks("ytsearch:ambient music").await.unwrap().unwrap();
+        let result = plugin
+            .load_tracks("ytsearch:ambient music")
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(result.load_type, PluginLoadType::Search);
         assert_eq!(result.data, json!([]));
