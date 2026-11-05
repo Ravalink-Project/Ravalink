@@ -205,15 +205,11 @@ fn invalid_player_field(
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<&'static str> {
     let field_validators: [PlayerFieldValidator; 9] = [
-        ("identifier", |value: &serde_json::Value| {
-            value.is_null() || value.is_string()
-        }),
+        ("identifier", |value: &serde_json::Value| value.is_string()),
         ("encodedTrack", |value: &serde_json::Value| {
             value.is_null() || value.is_string()
         }),
-        ("track", |value: &serde_json::Value| {
-            value.is_null() || value.is_object()
-        }),
+        ("track", |value: &serde_json::Value| value.is_object()),
         ("paused", |value: &serde_json::Value| value.is_boolean()),
         ("position", |value: &serde_json::Value| {
             value.as_u64().is_some()
@@ -237,10 +233,7 @@ fn invalid_player_field(
     }
 
     if let Some(track) = fields.get("track").and_then(serde_json::Value::as_object) {
-        if track
-            .get("identifier")
-            .is_some_and(|value| !value.is_null() && !value.is_string())
-        {
+        if track.get("identifier").is_some_and(|value| !value.is_string()) {
             return Some("track.identifier");
         }
         if track
@@ -772,15 +765,12 @@ async fn update_player(
     let nested_encoded_track = nested_track.and_then(|track| track.get("encoded"));
     let has_identifier = fields.contains_key("identifier") || nested_identifier.is_some();
     let has_encoded_track = fields.contains_key("encodedTrack") || nested_encoded_track.is_some();
-    let has_track_request = has_identifier
-        || has_encoded_track
-        || fields.get("track").is_some_and(serde_json::Value::is_null);
+    let has_track_request = has_identifier || has_encoded_track;
     let encoded_track_is_null = fields
         .get("encodedTrack")
         .is_some_and(serde_json::Value::is_null)
         || nested_encoded_track.is_some_and(serde_json::Value::is_null);
-    let track_request_is_null =
-        fields.get("track").is_some_and(serde_json::Value::is_null) || encoded_track_is_null;
+    let track_request_is_null = encoded_track_is_null;
     if fields.contains_key("track")
         && (fields.contains_key("identifier") || fields.contains_key("encodedTrack"))
     {
@@ -2607,7 +2597,6 @@ mod server_api_tests {
         let valid = serde_json::json!({
             "identifier": "https://cdn.example/audio.mp3",
             "encodedTrack": null,
-            "track": null,
             "paused": false,
             "position": 0,
             "endTime": null,
@@ -2620,6 +2609,7 @@ mod server_api_tests {
             ("identifier", serde_json::json!(42)),
             ("encodedTrack", serde_json::json!(false)),
             ("track", serde_json::json!("not-an-object")),
+            ("track", serde_json::Value::Null),
             ("paused", serde_json::json!("true")),
             ("position", serde_json::json!(-1)),
             ("endTime", serde_json::json!(0)),
