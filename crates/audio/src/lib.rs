@@ -4,9 +4,7 @@
 //! processor operates on interleaved floating-point PCM frames. Codec and
 //! Discord voice transport adapters can feed frames into this layer.
 
-use crate::voice_pcm::{
-    VOICE_CHANNELS, VOICE_SAMPLE_RATE, VoicePcmPacketizer, normalize_for_voice,
-};
+use crate::voice_pcm::{VOICE_CHANNELS, VOICE_SAMPLE_RATE, VoicePcmPacketizer};
 use ravalink_protocol::{Filters, Omissible, Timescale};
 use std::num::{NonZeroU16, NonZeroU32};
 use wsola::TimeStretch;
@@ -1043,7 +1041,7 @@ impl NativePlayer {
         pitched.sample_rate = adjusted_rate as u32;
         let normalized = normalize_for_voice(&pitched)?;
         stretcher.push(&normalized.samples);
-        let stretched = stretcher.pull(usize::MAX).collect::<Vec<_>>();
+        let stretched = Self::pull_timescale_output(stretcher, false)?;
         if !stretched.is_empty() {
             self.voice_packetizer.push(&PcmFrame {
                 samples: stretched,
@@ -1058,7 +1056,7 @@ impl NativePlayer {
         let Some(stretcher) = self.timescale.as_mut() else {
             return Ok(());
         };
-        let tail = stretcher.flush().collect::<Vec<_>>();
+        let tail = Self::pull_timescale_output(stretcher, true)?;
         if !tail.is_empty() {
             self.voice_packetizer.push(&PcmFrame {
                 samples: tail,
@@ -1067,6 +1065,26 @@ impl NativePlayer {
             })?;
         }
         Ok(())
+    }
+
+    fn pull_timescale_output(
+        stretcher: &mut TimeStretch,
+        draining: bool,
+    ) -> Result<Vec<f32>, AudioError> {
+        if draining {
+            stretcher.set_draining();
+        }
+        let block_size = stretcher.min_output_buff_size();
+        let mut block = vec![0.0; block_size];
+        let mut output = Vec::new();
+        loop {
+            match stretcher.pull(&mut block) {
+                Ok(written) => output.extend_from_slice(&block[..written]),
+                Err(wsola::Error::NotEnoughInput) => break,
+                Err(error) => return Err(AudioError::invalid(error.to_string())),
+            }
+        }
+        Ok(output)
     }
 
     pub fn next_frame(&mut self) -> Result<Option<PcmFrame>, AudioError> {
