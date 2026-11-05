@@ -332,6 +332,59 @@ mod tests {
     }
 
     #[test]
+    fn decodes_lavaplayer_v1_track_without_version_marker() {
+        let mut payload = Vec::new();
+        write_utf(&mut payload, "Legacy track").unwrap();
+        write_utf(&mut payload, "Legacy artist").unwrap();
+        payload.extend_from_slice(&123_000_i64.to_be_bytes());
+        write_utf(&mut payload, "legacy-track-id").unwrap();
+        payload.push(0);
+        write_utf(&mut payload, "youtube").unwrap();
+        payload.extend_from_slice(&5_000_u64.to_be_bytes());
+
+        let mut message = (payload.len() as u32).to_be_bytes().to_vec();
+        message.extend_from_slice(&payload);
+        let encoded = STANDARD.encode(message);
+
+        let decoded = decode_track(&encoded).unwrap();
+
+        assert_eq!(decoded.info.title, "Legacy track");
+        assert_eq!(decoded.info.author, "Legacy artist");
+        assert_eq!(decoded.info.length, 123_000);
+        assert_eq!(decoded.info.identifier, "legacy-track-id");
+        assert_eq!(decoded.info.source_name, "youtube");
+        assert_eq!(decoded.info.position, 5_000);
+        assert!(decoded.info.uri.is_none());
+        assert!(decoded.info.artwork_url.is_none());
+        assert!(decoded.info.isrc.is_none());
+    }
+
+    #[test]
+    fn http_track_probe_payload_round_trips_with_source_metadata() {
+        let mut track = sample_track();
+        track.info.source_name = "http".into();
+        let encoded = encode_track_with_source_data(&track, Some("MPEG")).unwrap();
+
+        let decoded = decode_track(&encoded).unwrap();
+
+        assert_eq!(decoded.info.source_name, "http");
+        assert_eq!(decoded.info.identifier, track.info.identifier);
+        assert_eq!(decoded.info.title, track.info.title);
+        assert_eq!(decoded.info.uri, track.info.uri);
+        assert_eq!(decoded.info.position, track.info.position);
+    }
+
+    #[test]
+    fn http_track_requires_a_container_probe_payload() {
+        let mut track = sample_track();
+        track.info.source_name = "http".into();
+
+        let error = encode_track(&track).unwrap_err();
+
+        assert!(error.message.contains("container probe descriptor"));
+    }
+
+    #[test]
     fn version_three_track_round_trips_unicode_metadata() {
         let mut track = sample_track();
         track.encoded = encode_track(&track).unwrap();
