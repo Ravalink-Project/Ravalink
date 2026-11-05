@@ -1,52 +1,71 @@
 ---
-description: How to run Lavalink as a Systemd service
+description: Run the RavaLink native binary as a systemd service.
 ---
 
-# Systemd Service
+# Systemd service
 
-If you're using a Systemd-based Linux distribution you may want to install Lavalink as a background service. You will need to create a `lavalink.service` file inside `/usr/lib/systemd/system`. Create the file with the following template (replacing the values inside the `<>` brackets):
+A systemd unit can keep RavaLink running in the background and restart it after a failure.
 
-```ini title="lavalink.service"
+## Prepare the service account
+
+Create a dedicated unprivileged account and install the binary and configuration in a directory readable by that account. The example below assumes:
+
+- Binary: /opt/ravalink/ravalink
+- Configuration: /etc/ravalink/ravalink.toml
+- Service user and group: ravalink
+
+Build the binary using the [source installation guide](binary.md), then install it at the path above.
+
+## Create the unit
+
+Create /etc/systemd/system/ravalink.service:
+
+~~~ini
 [Unit]
-# Describe the service
-Description=Lavalink Service
-
-# Configure service order
-After=syslog.target network.target
+Description=RavaLink audio node
+Wants=network-online.target
+After=network-online.target
 
 [Service]
-# The user which will run Lavalink
-User=<usr>
-
-# The group which will run Lavalink
-Group=<usr>
-
-# Where the program should start
-WorkingDirectory=</home/usr/lavalink>
-
-# The command to start Lavalink
-ExecStart=java -Xmx4G -jar </home/usr/lavalink>/Lavalink.jar
-
-# Restart the service if it crashes
+Type=simple
+User=ravalink
+Group=ravalink
+WorkingDirectory=/opt/ravalink
+Environment=RAVALINK_CONFIG=/etc/ravalink/ravalink.toml
+EnvironmentFile=/etc/ravalink/ravalink.env
+ExecStart=/opt/ravalink/ravalink
 Restart=on-failure
-
-# Delay each restart by 5s
-RestartSec=5s
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ravalink
 
 [Install]
-# Start this service as part of normal system start-up
 WantedBy=multi-user.target
-```
+~~~
 
-To initiate the service, run
+Create /etc/ravalink/ravalink.env with a strong secret:
 
-```shell
-$ sudo systemctl daemon-reload
-$ sudo systemctl enable lavalink
-$ sudo systemctl start lavalink
-```
+~~~bash
+RAVALINK_PASSWORD=replace-this-with-a-long-random-secret
+~~~
 
-In addition to the usual log files, you can also view the log with
-```shell 
-$ sudo journalctl -u lavalink
-```
+Restrict access to the environment file:
+
+~~~bash
+sudo chown root:ravalink /etc/ravalink/ravalink.env
+sudo chmod 0640 /etc/ravalink/ravalink.env
+~~~
+
+## Enable and inspect
+
+~~~bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ravalink
+sudo systemctl status ravalink
+sudo journalctl -u ravalink -f
+~~~
+
+Adjust the paths and service account to match your installation. Do not expose port 2333 publicly without a firewall and a secure reverse-proxy/TLS configuration.
