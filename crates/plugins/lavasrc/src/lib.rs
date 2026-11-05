@@ -1043,6 +1043,136 @@ fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
 mod tests {
     use super::*;
 
+    async fn mock_youtube_api(search_result: serde_json::Value, video_result: serde_json::Value) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            for body in [search_result.to_string(), video_result.to_string()] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0_u8; 4_096];
+                let _ = stream.read(&mut request).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn matches_external_catalog_track_to_playable_youtube_audio() {
+        let search_result = json!([{
+            "encoded": "candidate-track",
+            "info": {
+                "identifier": "dQw4w9WgXcQ",
+                "isSeekable": true,
+                "author": "Example Artist",
+                "length": 200000,
+                "isStream": false,
+                "position": 0,
+                "title": "Example Track",
+                "uri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "sourceName": "youtube",
+                "artworkUrl": null,
+                "isrc": null
+            },
+            "pluginInfo": {},
+            "userData": {}
+        }]);
+        let video_result = json!({
+            "videoId": "dQw4w9WgXcQ",
+            "title": "Example Track",
+            "author": "Example Artist",
+            "lengthSeconds": 200,
+            "adaptiveFormats": [{
+                "type": "audio/webm; codecs=opus",
+                "bitrate": 160000,
+                "url": "https://media.example/audio.webm"
+            }]
+        });
+        let api_base = mock_youtube_api(search_result, video_result).await;
+        let plugin = LavaSrcPlugin {
+            youtube: YouTubePlugin::new(api_base),
+            client: reqwest::Client::new(),
+            spotify_token: Arc::new(Mutex::new(None)),
+        };
+        let parsed = ProviderIdentifier {
+            provider: MusicProvider::Spotify,
+            content_type: "track".into(),
+            id: "spotify-track-id".into(),
+        };
+        let identifier = "https://open.spotify.com/track/spotify-track-id";
+
+        let matched = plugin
+            .match_external_track(
+                identifier,
+                &parsed,
+                ExternalTrack {
+                    title: "Example Track".into(),
+                    author: "Example Artist".into(),
+                    duration_ms: Some(200_000),
+                    artwork_url: Some("https://images.example/cover.jpg".into()),
+                    isrc: Some("USRC12345678".into()),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(matched.info.identifier, "spotify-track-id");
+        assert_eq!(matched.info.title, "Example Track");
+        assert_eq!(matched.info.author, "Example Artist");
+        assert_eq!(matched.info.source_name, "spotify");
+        assert_eq!(matched.info.uri.as_deref(), Some(identifier));
+        assert_eq!(matched.info.length, 200_000);
+        assert_eq!(
+            matched.info.artwork_url.as_deref(),
+            Some("https://images.example/cover.jpg")
+        );
+        assert_eq!(matched.info.isrc.as_deref(), Some("USRC12345678"));
+        assert_eq!(
+            matched.plugin_info["streamUrl"],
+            "https://media.example/audio.webm"
+        );
+        assert_eq!(matched.plugin_info["matchedSource"], "youtube");
+        assert!(!matched.encoded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejects_external_track_when_youtube_search_has_no_matches() {
+        let api_base = mock_youtube_api(json!([]), json!({})).await;
+        let plugin = LavaSrcPlugin {
+            youtube: YouTubePlugin::new(api_base),
+            client: reqwest::Client::new(),
+            spotify_token: Arc::new(Mutex::new(None)),
+        };
+        let parsed = ProviderIdentifier {
+            provider: MusicProvider::Deezer,
+            content_type: "track".into(),
+            id: "123456789".into(),
+        };
+
+        let error = plugin
+            .match_external_track(
+                "https://www.deezer.com/track/123456789",
+                &parsed,
+                ExternalTrack {
+                    title: "Missing Track".into(),
+                    author: "Missing Artist".into(),
+                    duration_ms: Some(180_000),
+                    artwork_url: None,
+                    isrc: None,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.message.contains("no sufficiently close YouTube match"));
+    }
+
     #[test]
     fn provider_response_limit_accepts_exact_limit_and_rejects_overflow() {
         let mut body = vec![0; MAX_PROVIDER_RESPONSE_BYTES - 1];
