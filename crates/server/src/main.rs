@@ -2291,6 +2291,25 @@ mod server_api_tests {
         });
         let url = format!("ws://{address}/v4/websocket");
 
+        let mut missing_name_request = url.clone().into_client_request().unwrap();
+        missing_name_request.headers_mut().insert(
+            "authorization",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("test-password"),
+        );
+        missing_name_request.headers_mut().insert(
+            "user-id",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
+        );
+        let missing_name_error = tokio_tungstenite::connect_async(missing_name_request)
+            .await
+            .expect_err("Client-Name is required by Lavalink v4");
+        match missing_name_error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            }
+            other => panic!("expected HTTP 400 for missing Client-Name, got {other}"),
+        }
+
         let mut request = url.clone().into_client_request().unwrap();
         request.headers_mut().insert(
             "authorization",
