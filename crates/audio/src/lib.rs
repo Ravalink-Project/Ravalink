@@ -4,7 +4,9 @@
 //! processor operates on interleaved floating-point PCM frames. Codec and
 //! Discord voice transport adapters can feed frames into this layer.
 
-use crate::voice_pcm::{VoicePcmPacketizer, normalize_for_voice, VOICE_CHANNELS, VOICE_SAMPLE_RATE};
+use crate::voice_pcm::{
+    VOICE_CHANNELS, VOICE_SAMPLE_RATE, VoicePcmPacketizer, normalize_for_voice,
+};
 use ravalink_protocol::{Filters, Omissible, Timescale};
 use std::num::{NonZeroU16, NonZeroU32};
 use wsola::TimeStretch;
@@ -789,7 +791,9 @@ impl NativePlayer {
     }
 
     pub fn new_with_opus_complexity(filters: Filters, opus_complexity: u8) -> Self {
-        let timescale = present(&filters.timescale).and_then(Option::as_ref).cloned();
+        let timescale = present(&filters.timescale)
+            .and_then(Option::as_ref)
+            .cloned();
         let mut player = Self {
             track: None,
             paused: false,
@@ -936,7 +940,9 @@ impl NativePlayer {
         self.position_ms = position_ms;
         self.voice_packetizer.clear();
         self.processor.reset_state();
-        if let Some(stretcher) = self.timescale.as_mut() { stretcher.reset(); }
+        if let Some(stretcher) = self.timescale.as_mut() {
+            stretcher.reset();
+        }
         if let Some(encoder) = self.opus_encoder.as_mut() {
             encoder.reset()?;
         }
@@ -1022,8 +1028,11 @@ impl NativePlayer {
         };
 
         let adjusted_rate = (f64::from(frame.sample_rate) * self.timescale_pitch_rate).round();
-        if !adjusted_rate.is_finite() || adjusted_rate < 1.0 || adjusted_rate > f64::from(u32::MAX) {
-            return Err(AudioError::invalid("timescale pitch/rate produced an invalid sample rate"));
+        if !adjusted_rate.is_finite() || adjusted_rate < 1.0 || adjusted_rate > f64::from(u32::MAX)
+        {
+            return Err(AudioError::invalid(
+                "timescale pitch/rate produced an invalid sample rate",
+            ));
         }
         let mut pitched = frame.clone();
         pitched.sample_rate = adjusted_rate as u32;
