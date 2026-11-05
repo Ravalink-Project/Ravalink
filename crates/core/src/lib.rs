@@ -245,6 +245,17 @@ pub struct PlayerStore {
 impl PlayerStore {
     /// Applies a Lavalink v4 player update and returns the complete player state.
     pub async fn update(&self, session_id: &str, guild_id: &str, update: Value) -> Value {
+        self.update_with_track_user_data(session_id, guild_id, update, None)
+            .await
+    }
+
+    pub async fn update_with_track_user_data(
+        &self,
+        session_id: &str,
+        guild_id: &str,
+        update: Value,
+        track_user_data: Option<Value>,
+    ) -> Value {
         let key = (session_id.to_owned(), guild_id.to_owned());
         let mut players = self.players.write().await;
         let player = players.entry(key).or_insert_with(|| {
@@ -275,11 +286,6 @@ impl PlayerStore {
                 match name.as_str() {
                     "guildId" | "state" | "endTime" | "position" => continue,
                     "track" => player["track"] = value.clone(),
-                    "userData" => {
-                        if player["track"].is_object() {
-                            player["track"]["userData"] = value.clone();
-                        }
-                    }
                     "filters" if value.is_object() => player["filters"] = value.clone(),
                     "volume" | "paused" | "voice" => player[name] = value.clone(),
                     _ => continue,
@@ -302,6 +308,11 @@ impl PlayerStore {
             {
                 player["state"]["position"] = position.clone();
             }
+        }
+        if let Some(user_data) = track_user_data
+            && player["track"].is_object()
+        {
+            player["track"]["userData"] = user_data;
         }
         player["state"]["time"] = json!(current_time_ms());
         player.clone()
@@ -487,7 +498,7 @@ mod player_store_tests {
             .await;
 
         store
-            .update("s", "g", json!({"userData": {"new": true}}))
+            .update_with_track_user_data("s", "g", json!({}), Some(json!({"new": true})))
             .await;
 
         let player = store.get("s", "g").await.unwrap();
