@@ -922,7 +922,7 @@ async fn update_player(
         object.remove("position");
         object.remove("endTime");
     }
-    if has_track_request && !no_replace_active {
+    if has_track_request && !no_replace_active && !track_request_is_null {
         normalized_update
             .as_object_mut()
             .expect("validated JSON object")
