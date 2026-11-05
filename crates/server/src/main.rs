@@ -2798,7 +2798,9 @@ mod server_api_tests {
     async fn update_player_rejects_filters_without_native_implementations() {
         let state = state();
         let session = state.sessions.create(123, None).await;
-        for filters in [serde_json::json!({"communityFilter": {"amount": 0.5}})] {
+        for filters in [serde_json::json!({
+            "pluginFilters": {"communityFilter": {"amount": 0.5}}
+        })] {
             let response = update_player(
                 authorized_headers(),
                 State(state.clone()),
