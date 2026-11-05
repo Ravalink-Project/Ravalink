@@ -12,7 +12,7 @@ use axum::{
 };
 use ravalink_audio::{
     AudioError, AudioTrack, CachedHttpSource, DiscordVoiceConnection, HttpSourceManager,
-    decode_bytes_to_channel_at,
+    VoiceWebSocketCloseInfo, decode_bytes_to_channel_at,
 };
 use ravalink_core::{AudioPlayerStore, DiscordVoiceState, PlayerStore, SessionStore};
 use ravalink_plugin_api::{PluginDescriptor, PluginRegistry, ProcessPlugin};
@@ -23,7 +23,8 @@ use ravalink_protocol::{
     ApiError, CpuStats, EncodedTracks, ExceptionSeverity, LoadResult, MemoryStats, NodeStats,
     PlayerStateUpdate, PlayerUpdateMessage, ServerInfo, SessionInfo, SessionUpdate, StatsMessage,
     Track, TrackEndEvent, TrackEndReason, TrackEvent, TrackEventBase, TrackException,
-    TrackExceptionEvent, TrackStuckEvent, WebSocketMessage, decode_track, encode_track,
+    TrackExceptionEvent, TrackStuckEvent, WebSocketClosedEvent, WebSocketMessage, decode_track,
+    encode_track,
 };
 use serde::Deserialize;
 use std::{
@@ -1262,19 +1263,28 @@ async fn run_voice_audio_loop(
                 }
             }
             _ = interval.tick() => {
+                while let Some(close_event) = connection.try_next_close_event() {
+                    publish_websocket_closed(state, session_id, guild_id, close_event);
+                }
                 if !connection.is_connected() {
+                    state
+                        .players
+                        .set_runtime_state(session_id, guild_id, 0, false, -1)
+                        .await;
                     warn!(%guild_id, "Discord voice gateway disconnected");
                     break;
                 }
+                let gateway_connected = connection.is_gateway_connected();
                 let snapshot = state.audio_players.snapshot(session_id, guild_id).await;
                 let position_ms = snapshot.as_ref().map_or(0, |player| player.position_ms);
                 state
                     .players
-                    .set_runtime_state(session_id, guild_id, position_ms, true, -1)
+                    .set_runtime_state(session_id, guild_id, position_ms, gateway_connected, -1)
                     .await;
-                let mut should_speak = snapshot
-                    .as_ref()
-                    .is_some_and(|player| player.track.is_some() && !player.paused);
+                let mut should_speak = gateway_connected
+                    && snapshot
+                        .as_ref()
+                        .is_some_and(|player| player.track.is_some() && !player.paused);
                 if should_speak {
                     should_speak = connection.dave.lock().await.can_send_audio();
                 }
@@ -1430,6 +1440,25 @@ async fn send_voice_silence(connection: &mut DiscordVoiceConnection) -> Result<(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     Ok(())
+}
+
+fn publish_websocket_closed(
+    state: &AppState,
+    session_id: &str,
+    guild_id: &str,
+    close_info: VoiceWebSocketCloseInfo,
+) {
+    let _ = state.events.send((
+        session_id.to_owned(),
+        WebSocketMessage::Event(Box::new(TrackEvent::WebSocketClosed(
+            WebSocketClosedEvent {
+                guild_id: guild_id.to_owned(),
+                code: close_info.code,
+                reason: close_info.reason,
+                by_remote: close_info.by_remote,
+            },
+        ))),
+    ));
 }
 
 fn publish_track_start(state: &AppState, session_id: &str, guild_id: &str, encoded_track: String) {
