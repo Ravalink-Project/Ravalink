@@ -42,7 +42,10 @@ impl YouTubePlugin {
     pub fn new(api_base: impl Into<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
-            .user_agent(format!("RavaLink/{} (native YouTube source)", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!(
+                "RavaLink/{} (native YouTube source)",
+                env!("CARGO_PKG_VERSION")
+            ))
             .build()
             .expect("valid default HTTP client");
         let api_base = api_base.into();
@@ -523,9 +526,7 @@ mod tests {
     async fn mock_api_response(status: &'static str, body: &'static str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
@@ -545,7 +546,11 @@ mod tests {
         let base = mock_api_response("200 OK", "[]").await;
         let plugin = YouTubePlugin::new(base);
 
-        let result = plugin.load_tracks("ytsearch:ambient music").await.unwrap().unwrap();
+        let result = plugin
+            .load_tracks("ytsearch:ambient music")
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(result.load_type, PluginLoadType::Search);
         assert_eq!(result.data, json!([]));
@@ -556,14 +561,18 @@ mod tests {
         let base = mock_api_response("200 OK", "{not-json").await;
         let plugin = YouTubePlugin::new(base);
 
-        let error = plugin.request_json("/api/v1/search?q=broken").await.unwrap_err();
+        let error = plugin
+            .request_json("/api/v1/search?q=broken")
+            .await
+            .unwrap_err();
 
         assert!(error.message.contains("invalid JSON response"));
     }
 
     #[tokio::test]
     async fn fails_over_when_a_provider_instance_is_unavailable() {
-        let unavailable = mock_api_response("503 Service Unavailable", "upstream unavailable").await;
+        let unavailable =
+            mock_api_response("503 Service Unavailable", "upstream unavailable").await;
         let healthy = mock_api_response("200 OK", "[]").await;
         let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
 
