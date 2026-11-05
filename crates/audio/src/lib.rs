@@ -1590,6 +1590,24 @@ mod tests {
     }
 
     #[test]
+    fn native_player_can_hold_pause_state_without_a_track() {
+        let mut player = NativePlayer::default();
+        player.pause(true).unwrap();
+        assert!(player.snapshot().paused);
+
+        player
+            .start(AudioTrack {
+                identifier: "after-pause".into(),
+                title: "After pause".into(),
+                author: "Test".into(),
+                duration_ms: Some(1_000),
+                is_stream: false,
+            })
+            .unwrap();
+        assert!(!player.snapshot().paused);
+    }
+
+    #[test]
     fn native_player_yields_decoded_frames_until_track_ends() {
         let mut player = NativePlayer::default();
         player
