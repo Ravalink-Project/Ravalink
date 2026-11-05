@@ -2749,7 +2749,7 @@ mod server_api_tests {
         assert_eq!(error["status"], StatusCode::NOT_FOUND.as_u16());
         assert_eq!(error["error"], "Not Found");
         assert_eq!(error["message"], "Session not found");
-        assert_eq!(error["path"], "/v4/sessions/missing-session/players/guild");
+        assert_eq!(error["path"], "/v4/sessions/missing-session/players/123456");
         assert!(error["timestamp"].as_u64().is_some());
     }
 
