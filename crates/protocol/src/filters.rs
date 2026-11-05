@@ -203,6 +203,53 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_every_lavalink_v4_standard_filter() {
+        let value = serde_json::json!({
+            "volume": 1.0,
+            "equalizer": [{"band": 0, "gain": 0.2}],
+            "karaoke": {
+                "level": 1.0,
+                "monoLevel": 1.0,
+                "filterBand": 220.0,
+                "filterWidth": 100.0
+            },
+            "timescale": {"speed": 1.0, "pitch": 1.0, "rate": 1.0},
+            "tremolo": {"frequency": 2.0, "depth": 0.5},
+            "vibrato": {"frequency": 2.0, "depth": 0.5},
+            "rotation": {"rotationHz": 0.0},
+            "distortion": {
+                "sinOffset": 0.0,
+                "sinScale": 1.0,
+                "cosOffset": 0.0,
+                "cosScale": 1.0,
+                "tanOffset": 0.0,
+                "tanScale": 1.0,
+                "offset": 0.0,
+                "scale": 1.0
+            },
+            "channelMix": {
+                "leftToLeft": 1.0,
+                "leftToRight": 0.0,
+                "rightToLeft": 0.0,
+                "rightToRight": 1.0
+            },
+            "lowPass": {"smoothing": 20.0}
+        });
+
+        let filters: Filters = serde_json::from_value(value.clone()).unwrap();
+        assert!(matches!(filters.timescale, Omissible::Present(Some(_))));
+        assert_eq!(serde_json::to_value(filters).unwrap(), value);
+    }
+
+    #[test]
+    fn empty_filter_state_serializes_without_omitted_fields() {
+        assert_eq!(
+            serde_json::to_value(Filters::default()).unwrap(),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
     fn preserves_unknown_filter_keys_as_plugin_filters() {
         let filters: Filters =
             serde_json::from_str(r#"{"customPlugin":{"strength":0.75}}"#).unwrap();
