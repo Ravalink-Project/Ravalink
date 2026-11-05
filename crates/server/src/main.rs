@@ -2612,8 +2612,7 @@ mod server_api_tests {
             "position": 0,
             "endTime": null,
             "volume": 1000,
-            "filters": {},
-            "voice": null
+            "filters": {}
         });
         assert_eq!(invalid_player_field(valid.as_object().unwrap()), None);
 
@@ -2627,6 +2626,7 @@ mod server_api_tests {
             ("volume", serde_json::json!(1001)),
             ("filters", serde_json::json!([])),
             ("voice", serde_json::json!([])),
+            ("voice", serde_json::Value::Null),
         ] {
             let invalid =
                 serde_json::Value::Object([(field.to_owned(), value)].into_iter().collect());
