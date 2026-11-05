@@ -2188,10 +2188,7 @@ mod server_api_tests {
         );
 
         let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
-        assert_eq!(
-            response.headers().get("session-resumed").unwrap(),
-            "false"
-        );
+        assert_eq!(response.headers().get("session-resumed").unwrap(), "false");
         let ready = socket.next().await.unwrap().unwrap().into_text().unwrap();
         let ready: serde_json::Value = serde_json::from_str(&ready).unwrap();
         assert_eq!(ready["op"], "ready");
@@ -2235,7 +2232,9 @@ mod server_api_tests {
         );
 
         let (mut resumed_socket, resume_response) =
-            tokio_tungstenite::connect_async(resume_request).await.unwrap();
+            tokio_tungstenite::connect_async(resume_request)
+                .await
+                .unwrap();
         assert_eq!(
             resume_response.headers().get("session-resumed").unwrap(),
             "true"
