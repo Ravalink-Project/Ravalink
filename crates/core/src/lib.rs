@@ -229,6 +229,13 @@ mod tests {
     }
 }
 
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 /// In-memory player state, scoped to a Lavalink session and Discord guild.
 #[derive(Clone, Default)]
 pub struct PlayerStore {
@@ -278,15 +285,19 @@ impl PlayerStore {
                 }
             }
         }
+        player["state"]["time"] = json!(current_time_ms());
         player.clone()
     }
 
     pub async fn get(&self, session_id: &str, guild_id: &str) -> Option<Value> {
-        self.players
+        let mut player = self
+            .players
             .read()
             .await
             .get(&(session_id.to_owned(), guild_id.to_owned()))
-            .cloned()
+            .cloned()?;
+        player["state"]["time"] = json!(current_time_ms());
+        Some(player)
     }
 
     pub async fn list(&self, session_id: &str) -> Vec<Value> {
@@ -295,7 +306,11 @@ impl PlayerStore {
             .await
             .iter()
             .filter(|((session, _), _)| session == session_id)
-            .map(|(_, player)| player.clone())
+            .map(|(_, player)| {
+                let mut player = player.clone();
+                player["state"]["time"] = json!(current_time_ms());
+                player
+            })
             .collect()
     }
 
@@ -334,11 +349,7 @@ impl PlayerStore {
         let key = (session_id.to_owned(), guild_id.to_owned());
         let mut players = self.players.write().await;
         if let Some(player) = players.get_mut(&key) {
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_millis() as u64)
-                .unwrap_or_default();
-            player["state"]["time"] = json!(now_ms);
+            player["state"]["time"] = json!(current_time_ms());
             player["state"]["position"] = json!(position_ms);
             player["state"]["connected"] = json!(connected);
             player["state"]["ping"] = json!(ping_ms);
@@ -359,6 +370,20 @@ impl PlayerStore {
 mod player_store_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn player_state_time_is_populated_on_reads_and_updates() {
+        let store = PlayerStore::default();
+        let updated = store.update("s", "g", json!({})).await;
+        assert!(updated["state"]["time"].as_u64().unwrap() > 0);
+
+        let fetched = store.get("s", "g").await.unwrap();
+        assert!(fetched["state"]["time"].as_u64().unwrap() > 0);
+
+        let listed = store.list("s").await;
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0]["state"]["time"].as_u64().unwrap() > 0);
+    }
 
     #[tokio::test]
     async fn new_player_has_non_null_lavalink_voice_state() {
