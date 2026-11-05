@@ -1630,7 +1630,7 @@ mod tests {
 
     #[test]
     fn native_player_timescale_keeps_speed_pitch_and_rate_independent() {
-        fn render_frames(speed: f64, pitch: f64, rate: f64) -> usize {
+        fn render_frames(speed: f64, pitch: f64, rate: f64) -> (usize, f64) {
             let mut player = NativePlayer::default();
             player
                 .load_decoded_track(
@@ -1666,20 +1666,27 @@ mod tests {
             player.set_filters(filters);
 
             let mut output_frames = 0;
-            while player.next_voice_frame().unwrap().is_some() {
+            let mut mono = Vec::new();
+            while let Some(output) = player.next_voice_frame().unwrap() {
                 output_frames += 1;
+                mono.extend(output.samples.iter().step_by(2).copied());
             }
             assert_eq!(
                 player.take_completed_track().unwrap().identifier,
                 "timescale"
             );
-            output_frames
+            let positive_crossings = mono
+                .windows(2)
+                .filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0)
+                .count();
+            let frequency_hz = positive_crossings as f64 * 48_000.0 / mono.len() as f64;
+            (output_frames, frequency_hz)
         }
 
-        let original_duration = render_frames(1.0, 1.0, 1.0);
-        let faster = render_frames(2.0, 1.0, 1.0);
-        let higher_pitch = render_frames(1.0, 2.0, 1.0);
-        let faster_rate = render_frames(1.0, 1.0, 2.0);
+        let (original_duration, original_pitch) = render_frames(1.0, 1.0, 1.0);
+        let (faster, speed_only_pitch) = render_frames(2.0, 1.0, 1.0);
+        let (higher_pitch, pitch_only_pitch) = render_frames(1.0, 2.0, 1.0);
+        let (faster_rate, rate_only_pitch) = render_frames(1.0, 1.0, 2.0);
 
         assert!((45..=55).contains(&original_duration));
         assert!((20..=30).contains(&faster));
@@ -1690,6 +1697,18 @@ mod tests {
         assert!(
             (20..=30).contains(&faster_rate),
             "rate changes both pitch and duration, got {faster_rate} frames"
+        );
+        assert!(
+            (original_pitch * 0.9..=original_pitch * 1.1).contains(&speed_only_pitch),
+            "speed-only must preserve pitch: {original_pitch:.1} Hz -> {speed_only_pitch:.1} Hz"
+        );
+        assert!(
+            (original_pitch * 1.8..=original_pitch * 2.2).contains(&pitch_only_pitch),
+            "pitch-only must double pitch: {original_pitch:.1} Hz -> {pitch_only_pitch:.1} Hz"
+        );
+        assert!(
+            (original_pitch * 1.8..=original_pitch * 2.2).contains(&rate_only_pitch),
+            "rate-only must double pitch: {original_pitch:.1} Hz -> {rate_only_pitch:.1} Hz"
         );
     }
 
