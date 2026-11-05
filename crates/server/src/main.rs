@@ -3049,6 +3049,65 @@ mod server_api_tests {
         assert_eq!(stuck["thresholdMs"], 10_000);
     }
 
+    fn encoded_api_test_track() -> String {
+        let track = Track {
+            encoded: String::new(),
+            info: ravalink_protocol::TrackInfo {
+                identifier: "dQw4w9WgXcQ".into(),
+                is_seekable: true,
+                author: "Example Artist".into(),
+                length: 210_000,
+                is_stream: false,
+                position: 0,
+                title: "Example Track".into(),
+                uri: Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ".into()),
+                source_name: "youtube".into(),
+                artwork_url: None,
+                isrc: None,
+            },
+            plugin_info: serde_json::json!({}),
+            user_data: serde_json::json!({}),
+        };
+        encode_track(&track).unwrap()
+    }
+
+    #[tokio::test]
+    async fn decode_track_endpoint_returns_decoded_lavalink_track() {
+        let encoded = encoded_api_test_track();
+        let response = decode_track_endpoint(
+            authorized_headers(),
+            State(state()),
+            Query(DecodeTrackQuery {
+                encoded_track: Some(encoded),
+                track: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let decoded: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(decoded["info"]["identifier"], "dQw4w9WgXcQ");
+        assert_eq!(decoded["info"]["title"], "Example Track");
+    }
+
+    #[tokio::test]
+    async fn decode_tracks_endpoint_returns_decoded_track_array() {
+        let encoded = encoded_api_test_track();
+        let response = decode_tracks_endpoint(
+            authorized_headers(),
+            State(state()),
+            Json(EncodedTracks(vec![encoded])),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let decoded: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(decoded.as_array().map(Vec::len), Some(1));
+        assert_eq!(decoded[0]["info"]["identifier"], "dQw4w9WgXcQ");
+    }
+
     #[tokio::test]
     async fn stats_endpoint_returns_lavalink_v4_stats_shape() {
         let response = stats(authorized_headers(), State(state())).await;
