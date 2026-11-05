@@ -2300,9 +2300,13 @@ mod server_api_tests {
             "user-id",
             tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
         );
-        let missing_name_error = tokio_tungstenite::connect_async(missing_name_request)
-            .await
-            .expect_err("Client-Name is required by Lavalink v4");
+        let missing_name_error = match tokio_tungstenite::connect_async(missing_name_request).await {
+            Err(error) => error,
+            Ok((mut socket, _)) => {
+                let _ = socket.close(None).await;
+                panic!("Client-Name is required by Lavalink v4");
+            }
+        };
         match missing_name_error {
             tokio_tungstenite::tungstenite::Error::Http(response) => {
                 assert_eq!(response.status(), StatusCode::BAD_REQUEST);
