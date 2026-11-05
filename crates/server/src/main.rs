@@ -2034,7 +2034,11 @@ mod server_api_tests {
             "invalid volume must be rejected before a track/player is created"
         );
         assert!(
-            state.audio_players.snapshot(&session.id, "guild").await.is_none(),
+            state
+                .audio_players
+                .snapshot(&session.id, "guild")
+                .await
+                .is_none(),
             "invalid volume must not create native playback state"
         );
     }
