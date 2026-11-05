@@ -1,28 +1,35 @@
 ---
-description: A list of plugins for Lavalink.
+description: Native extensions and built-in source integrations for RavaLink.
 ---
 
-# Plugins
+# Plugins and extensions
 
-Lavalink supports third-party plugins to add additional functionality such as custom audio sources, custom filters,
-WebSocket handling, REST endpoints, and much more.
+RavaLink has its own native extension model. It is **not** a JVM plugin host: Java JAR plugins built for the original Lavalink server are not directly loadable.
 
-Lavalink loads all .jar files placed in the `plugins` directory, which you may need to create yourself. Lavalink can
-also download plugin .jar files automatically by editing the configuration file. See the respective plugin repository
-for instructions.
+## Built-in integrations
 
-| Plugin                                                                     | Description                                                                                                                                |
-|----------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| [YouTube Plugin](https://github.com/lavalink-devs/youtube-source#plugin)   | YouTube source plugin for Lavalink                                                                                                         |
-| [Google Cloud TTS Plugin](https://github.com/DuncteBot/tts-plugin)         | A text to speech plugin using the [google cloud tts api](https://cloud.google.com/text-to-speech/docs)                                     |
-| [SponsorBlock Plugin](https://github.com/topi314/SponsorBlock-Plugin)      | Skip sponsor segments in YouTube videos & return YouTube video chapter information                                                         |
-| [LavaSrc Plugin](https://github.com/topi314/LavaSrc)                       | Spotify, Apple Music & Deezer(native play) support                                                                                         |
-| [LavaSearch Plugin](https://github.com/topi314/LavaSearch)                 | Advanced search functionality including playlists, albums, artists, tracks & terms                                                         |
-| [LavaLyrics Plugin](https://github.com/topi314/LavaLyrics)                 | Lyrics API which can be used by other plugins                                                                                              |
-| [DuncteBot Plugin](https://github.com/DuncteBot/skybot-lavalink-plugin)    | Additional source managers that are not widely used                                                                                        |
-| [XM Plugin](https://github.com/esmBot/lava-xm-plugin)                      | Support for various [music tracker module](https://en.wikipedia.org/wiki/Module_file) formats                                              |
-| [Lyrics.kt Plugin](https://github.com/DRSchlaubi/lyrics.kt)                | Plugin that fetches timestamped lyrics from YouTube                                                                                        |
-| [Java Timed Lyrics Plugin](https://github.com/DuncteBot/java-timed-lyrics) | Timestamped lyrics from YouTube with Genius fallback, supports IP-rotation (supports: [LavaLyrics](https://github.com/topi314/LavaLyrics)) |
-| [LavaDSPX Plugin](https://github.com/Devoxin/LavaDSPX-Plugin)              | Additional audio filters for Lavalink                                                                                                      |
+The Rust workspace currently includes these provider crates:
 
-If you want to make your own plugin, see [here](api/plugins.md).
+| Integration | Purpose |
+|---|---|
+| YouTube | YouTube search, metadata resolution and playable audio stream selection |
+| LavaSrc | Spotify, Apple Music and Deezer catalog resolution and matching |
+| LavaSearch | Structured search and source query handling |
+
+Provider behavior can depend on external services, credentials, rate limits and upstream changes. See the configuration reference for provider settings and the [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) for known limitations.
+
+## External Rust extensions
+
+RavaLink can discover community plugin manifests and launch configured native executables using a versioned JSON-over-stdio protocol.
+
+- Extensions run as child processes.
+- Requests and responses use JSON.
+- The protocol has response-size and execution-time limits.
+- Executables run with the RavaLink service account and are trusted code; this is not a security sandbox.
+- Dynamic library loading and a stable binary ABI are not currently provided.
+
+Read the [external process extension guide](plugins/external-process.md) for the manifest format, request contract and configuration examples.
+
+## Contributing an integration
+
+Before building a new integration, open a discussion in the [RavaLink Discord](https://discord.gg/PBxB5eFNUp) or the repository issue tracker. Include the provider, expected operations, authentication requirements, legal/API constraints and test strategy.
