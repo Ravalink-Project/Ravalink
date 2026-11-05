@@ -10,7 +10,7 @@ The reference Lavalink server exposes a REST API to allow for easy control of th
 Most routes require the `Authorization` header with the configured password.
 
 ```
-Authorization: youshallnotpass
+Authorization: YOUR_NODE_PASSWORD
 ```
 
 Routes are prefixed with `/v3` as of `v3.7.0` and `/v4` as of `v4.0.0`. Routes without an API prefix were removed in v4 (except `/version`).
