@@ -983,6 +983,14 @@ impl NativePlayer {
         if self.track.is_none() || self.paused {
             return Ok(None);
         }
+        if self.end_time_ms == Some(0) {
+            self.completed_track = self.track.take();
+            self.paused = false;
+            self.position_ms = 0;
+            self.end_time_ms = None;
+            self.voice_packetizer.clear();
+            return Ok(None);
+        }
         if let Some(result) = self
             .streamed_frames
             .as_mut()
@@ -1031,9 +1039,6 @@ impl NativePlayer {
     }
 
     pub fn set_end_time(&mut self, end_time_ms: Option<u64>) -> Result<(), AudioError> {
-        if end_time_ms.is_some_and(|end_time| end_time == 0) {
-            return Err(AudioError::invalid("end time must be greater than zero"));
-        }
         self.end_time_ms = end_time_ms;
         Ok(())
     }
@@ -1498,6 +1503,31 @@ mod tests {
         assert!(player.next_frame().unwrap().is_some());
         assert!(player.next_frame().unwrap().is_some());
         assert!(player.next_frame().unwrap().is_none());
+        assert!(player.snapshot().track.is_none());
+    }
+
+    #[test]
+    fn end_time_zero_is_valid_and_finishes_before_emitting_audio() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "zero-end".into(),
+                    title: "Zero end".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(1_000),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.25; 1_920], 2)],
+            )
+            .unwrap();
+
+        player.set_end_time(Some(0)).unwrap();
+        assert!(player.next_frame().unwrap().is_none());
+        assert_eq!(
+            player.take_completed_track().unwrap().identifier,
+            "zero-end"
+        );
         assert!(player.snapshot().track.is_none());
     }
 
