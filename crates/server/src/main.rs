@@ -2376,7 +2376,9 @@ mod server_api_tests {
         );
         resume_request.headers_mut().insert(
             "client-name",
-            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("RavaLink-Contract-Test/1.0"),
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static(
+                "RavaLink-Contract-Test/1.0",
+            ),
         );
         resume_request.headers_mut().insert(
             "session-id",
