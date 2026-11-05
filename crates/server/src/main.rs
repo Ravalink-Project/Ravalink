@@ -840,6 +840,36 @@ async fn update_player(
         );
     }
 
+    // Validate and deserialize filters before mutating playback state. A PATCH
+    // containing an unsupported filter must not start/replace a track and then
+    // fail halfway through the request.
+    let filters_update = if let Some(value) = fields.get("filters") {
+        let filters = match serde_json::from_value::<ravalink_protocol::Filters>(value.clone()) {
+            Ok(filters) => filters,
+            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error.to_string(), &path),
+        };
+        if matches!(
+            filters.timescale,
+            ravalink_protocol::Omissible::Present(Some(_))
+        ) {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "The timescale filter is not implemented by the native audio engine",
+                &path,
+            );
+        }
+        if !filters.plugin_filters.is_empty() {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "Plugin-specific filters are not supported by this node",
+                &path,
+            );
+        }
+        Some(filters)
+    } else {
+        None
+    };
+
     let fields = fields.clone();
     let mut normalized_update = update;
     if no_replace_active {
@@ -968,28 +998,7 @@ async fn update_player(
             return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
         }
     }
-    if let Some(filters) = fields.get("filters") {
-        let filters = match serde_json::from_value::<ravalink_protocol::Filters>(filters.clone()) {
-            Ok(filters) => filters,
-            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error.to_string(), &path),
-        };
-        if matches!(
-            filters.timescale,
-            ravalink_protocol::Omissible::Present(Some(_))
-        ) {
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                "The timescale filter is not implemented by the native audio engine",
-                &path,
-            );
-        }
-        if !filters.plugin_filters.is_empty() {
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                "Plugin-specific filters are not supported by this node",
-                &path,
-            );
-        }
+    if let Some(filters) = filters_update {
         state
             .audio_players
             .set_filters(&session_id, &guild_id, filters)
@@ -2058,6 +2067,49 @@ mod server_api_tests {
             );
         }
         assert!(info["plugins"].is_array());
+    }
+
+    #[tokio::test]
+    async fn update_player_validates_filters_before_starting_or_replacing_a_track() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        state
+            .players
+            .update(
+                &session.id,
+                "guild",
+                serde_json::json!({
+                    "guildId": "guild",
+                    "track": null,
+                    "volume": 100,
+                    "paused": false
+                }),
+            )
+            .await;
+
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({
+                "identifier": "https://cdn.example/audio.mp3",
+                "filters": {"timescale": {"speed": 1.25}}
+            })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let player = state.players.get(&session.id, "guild").await.unwrap();
+        assert!(player["track"].is_null());
+        assert_eq!(player["volume"], 100);
+        assert!(
+            state
+                .audio_players
+                .snapshot(&session.id, "guild")
+                .await
+                .is_none_or(|snapshot| snapshot.track.is_none())
+        );
     }
 
     #[tokio::test]
