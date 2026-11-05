@@ -24,3 +24,7 @@ ravalink-plugin-api = { path = "../plugins/plugin-api" }
 ravalink-plugin-youtube = { path = "../plugins/youtube" }
 ravalink-plugin-lavasrc = { path = "../plugins/lavasrc" }
 ravalink-plugin-lavasearch = { path = "../plugins/lavasearch" }
+
+[dev-dependencies]
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
