@@ -28,7 +28,7 @@ performed during the RC cycle.
       unavailable providers and playable-track matching.
 - [ ] Voice protocol tests cover RTP encryption modes, DAVE state transitions,
       gateway resume and UDP recovery paths.
-- [ ] The release binary smoke test passes and release assets have checksums.
+- [ ] The release binary smoke test passes, and the release workflow builds both target binaries and generates SHA256SUMS before publishing assets.
 - [ ] COMPATIBILITY.md contains no unimplemented or silently ignored base
       Lavalink v4 behavior.
 
