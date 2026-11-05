@@ -703,15 +703,10 @@ async fn delete_player(
     if state.sessions.get(&session_id).await.is_none() {
         return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
     }
-    if state.players.get(&session_id, &_guild_id).await.is_none() {
+    let Some(player) = state.players.get(&session_id, &_guild_id).await else {
         return api_error(StatusCode::NOT_FOUND, "Player not found", &path);
-    }
-    if let Some(encoded) = state
-        .players
-        .get(&session_id, &_guild_id)
-        .await
-        .and_then(|player| player["track"]["encoded"].as_str().map(str::to_owned))
-    {
+    };
+    if let Some(encoded) = player["track"]["encoded"].as_str().map(str::to_owned) {
         publish_track_end(
             &state,
             &session_id,
