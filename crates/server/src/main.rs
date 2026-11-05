@@ -2161,6 +2161,101 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn websocket_handshake_supports_optional_client_name_and_session_resume() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let state = state();
+        let app = Router::new()
+            .route("/v4/websocket", get(websocket))
+            .with_state(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let url = format!("ws://{address}/v4/websocket");
+
+        let mut request = url.clone().into_client_request().unwrap();
+        request.headers_mut().insert(
+            "authorization",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("test-password"),
+        );
+        request.headers_mut().insert(
+            "user-id",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
+        );
+
+        let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
+        assert_eq!(
+            response.headers().get("session-resumed").unwrap(),
+            "false"
+        );
+        let ready = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        let ready: serde_json::Value = serde_json::from_str(&ready).unwrap();
+        assert_eq!(ready["op"], "ready");
+        assert_eq!(ready["resumed"], false);
+        let session_id = ready["sessionId"].as_str().unwrap().to_owned();
+
+        state
+            .sessions
+            .update(&session_id, Some(true), Some(120))
+            .await
+            .unwrap();
+        socket.close(None).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if state
+                    .sessions
+                    .get(&session_id)
+                    .await
+                    .is_some_and(|session| session.disconnected_at.is_some())
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let mut resume_request = url.into_client_request().unwrap();
+        resume_request.headers_mut().insert(
+            "authorization",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("test-password"),
+        );
+        resume_request.headers_mut().insert(
+            "user-id",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
+        );
+        resume_request.headers_mut().insert(
+            "session-id",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&session_id).unwrap(),
+        );
+
+        let (mut resumed_socket, resume_response) =
+            tokio_tungstenite::connect_async(resume_request).await.unwrap();
+        assert_eq!(
+            resume_response.headers().get("session-resumed").unwrap(),
+            "true"
+        );
+        let ready = resumed_socket
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap();
+        let ready: serde_json::Value = serde_json::from_str(&ready).unwrap();
+        assert_eq!(ready["op"], "ready");
+        assert_eq!(ready["resumed"], true);
+        assert_eq!(ready["sessionId"], session_id);
+
+        resumed_socket.close(None).await.unwrap();
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn session_update_returns_effective_resume_configuration() {
         let state = state();
         let session = state.sessions.create(123, None).await;
