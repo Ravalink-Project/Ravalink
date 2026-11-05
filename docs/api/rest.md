@@ -1,10 +1,12 @@
 ---
-description: Lavalink REST API documentation.
+description: Lavalink v4 REST API targeted by RavaLink.
 ---
 
 # REST API
 
-Lavalink exposes a REST API to allow for easy control of the players.
+RavaLink targets the Lavalink v4 REST API for track resolution, player control, sessions and statistics. This page describes the protocol contract; implementation status and known gaps are tracked in the [RavaLink compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md).
+
+The reference Lavalink server exposes a REST API to allow for easy control of the players.
 Most routes require the `Authorization` header with the configured password.
 
 ```
