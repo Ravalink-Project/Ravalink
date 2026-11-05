@@ -111,3 +111,8 @@ assert_status 404 "$base/metrics"
 
 rm -f /tmp/ravalink-smoke-response
 echo "RavaLink API smoke test passed."
+
+# Exercise an actual supported Lavalink client against the running server.
+python3 -m venv "$tmpdir/wavelink-venv"
+"$tmpdir/wavelink-venv/bin/python" -m pip install --disable-pip-version-check --quiet "wavelink==3.5.2"
+"$tmpdir/wavelink-venv/bin/python" scripts/wavelink-smoke.py "http://127.0.0.1:$port" "$password"
