@@ -66,7 +66,10 @@ impl Default for LavaSrcPlugin {
             youtube: YouTubePlugin::default(),
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
-                .user_agent(format!("RavaLink/{} (native LavaSrc adapter)", env!("CARGO_PKG_VERSION")))
+                .user_agent(format!(
+                    "RavaLink/{} (native LavaSrc adapter)",
+                    env!("CARGO_PKG_VERSION")
+                ))
                 .build()
                 .expect("valid default HTTP client"),
             spotify_token: Arc::new(Mutex::new(None)),
