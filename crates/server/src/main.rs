@@ -1263,8 +1263,26 @@ async fn run_voice_audio_loop(
                 }
             }
             _ = interval.tick() => {
+                let mut websocket_closed = false;
                 while let Some(close_event) = connection.try_next_close_event() {
                     publish_websocket_closed(state, session_id, guild_id, close_event);
+                    websocket_closed = true;
+                }
+                if websocket_closed {
+                    let position_ms = state
+                        .audio_players
+                        .snapshot(session_id, guild_id)
+                        .await
+                        .map_or(0, |player| player.position_ms);
+                    state
+                        .players
+                        .set_runtime_state(session_id, guild_id, position_ms, false, -1)
+                        .await;
+                    speaking = false;
+                    last_position_ms = None;
+                    stalled_since = None;
+                    stuck_reported = false;
+                    continue;
                 }
                 if !connection.is_connected() {
                     state
