@@ -1278,6 +1278,22 @@ async fn run_voice_audio_loop(
                         .players
                         .set_runtime_state(session_id, guild_id, position_ms, false, -1)
                         .await;
+                    if let Some(player) = state.players.get(session_id, guild_id).await {
+                        let time = player["state"]["time"].as_u64().unwrap_or_default();
+                        let position = player["state"]["position"].as_u64().unwrap_or_default();
+                        let _ = state.events.send((
+                            session_id.to_owned(),
+                            WebSocketMessage::PlayerUpdate(PlayerUpdateMessage {
+                                guild_id: guild_id.to_owned(),
+                                state: PlayerStateUpdate {
+                                    time,
+                                    position,
+                                    connected: false,
+                                    ping: Some(-1),
+                                },
+                            }),
+                        ));
+                    }
                     speaking = false;
                     last_position_ms = None;
                     stalled_since = None;
