@@ -227,6 +227,25 @@ mod tests {
     }
 
     #[test]
+    fn websocket_closed_event_matches_lavalink_wire_shape() {
+        let event = WebSocketMessage::Event(Box::new(TrackEvent::WebSocketClosed(
+            WebSocketClosedEvent {
+                guild_id: "123".into(),
+                code: 4014,
+                reason: "voice channel changed".into(),
+                by_remote: true,
+            },
+        )));
+        let json = serde_json::to_value(event).unwrap();
+        assert_eq!(json["op"], "event");
+        assert_eq!(json["type"], "WebSocketClosedEvent");
+        assert_eq!(json["guildId"], "123");
+        assert_eq!(json["code"], 4014);
+        assert_eq!(json["reason"], "voice channel changed");
+        assert_eq!(json["byRemote"], true);
+    }
+
+    #[test]
     fn track_exception_and_stuck_events_embed_track_objects() {
         let exception =
             WebSocketMessage::Event(Box::new(TrackEvent::TrackException(TrackExceptionEvent {
