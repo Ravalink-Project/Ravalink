@@ -7,16 +7,16 @@ performed during the RC cycle.
 
 ## Automated pre-RC1 gates
 
-- [ ] The current master commit passes rustfmt, the full workspace test suite,
+- [x] The current master commit passes rustfmt, the full workspace test suite,
       and Clippy with warnings denied.
-- [ ] Linux x86_64 and ARM64 optimized builds and API smoke tests pass.
-- [ ] Ubuntu, macOS and Windows workspace tests pass.
-- [ ] The Docker image builds successfully.
+- [x] Linux x86_64 and ARM64 optimized builds and API smoke tests pass.
+- [x] Ubuntu, macOS and Windows workspace tests pass.
+- [x] The Docker image builds successfully.
 - [ ] REST route, request, response, status-code and error contracts are covered
       by automated tests against the supported Lavalink v4 behavior.
 - [ ] WebSocket handshake, session resume, player updates, event payloads,
       heartbeat timeout and reconnect behavior have automated contract tests.
-- [ ] Wavelink and Shoukaku compatibility smoke tests pass without RavaLink-
+- [x] Wavelink and Shoukaku compatibility smoke tests pass without RavaLink-
       specific client patches.
 - [ ] Track codec fixtures cover supported Lavaplayer versions and built-in
       source payloads; unsupported plugin payloads fail explicitly.
