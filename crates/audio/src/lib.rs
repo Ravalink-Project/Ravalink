@@ -5,7 +5,7 @@
 //! Discord voice transport adapters can feed frames into this layer.
 
 use crate::voice_pcm::{VoicePcmPacketizer, normalize_for_voice, VOICE_CHANNELS, VOICE_SAMPLE_RATE};
-use ravalink_protocol::{Filters, Omissible};
+use ravalink_protocol::{Filters, Omissible, Timescale};
 use std::num::{NonZeroU16, NonZeroU32};
 use wsola::TimeStretch;
 
@@ -789,7 +789,8 @@ impl NativePlayer {
     }
 
     pub fn new_with_opus_complexity(filters: Filters, opus_complexity: u8) -> Self {
-        Self {
+        let timescale = present(&filters.timescale).and_then(Option::as_ref).cloned();
+        let mut player = Self {
             track: None,
             paused: false,
             position_ms: 0,
@@ -805,7 +806,9 @@ impl NativePlayer {
             opus_encoder: None,
             opus_complexity: opus_complexity.min(10),
             completed_track: None,
-        }
+        };
+        player.configure_timescale(timescale);
+        player
     }
 
     /// Take a track that ended naturally during audio processing.
@@ -831,6 +834,10 @@ impl NativePlayer {
     pub fn set_filters(&mut self, filters: Filters) {
         let timescale = present(&filters.timescale).and_then(Option::as_ref).cloned();
         self.processor.set_filters(filters);
+        self.configure_timescale(timescale);
+    }
+
+    fn configure_timescale(&mut self, timescale: Option<Timescale>) {
         self.voice_packetizer.clear();
         self.timescale = None;
         self.timescale_pitch_rate = 1.0;
