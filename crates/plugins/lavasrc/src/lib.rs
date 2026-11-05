@@ -1069,22 +1069,10 @@ mod tests {
     #[tokio::test]
     async fn matches_external_catalog_track_to_playable_youtube_audio() {
         let search_result = json!([{
-            "encoded": "candidate-track",
-            "info": {
-                "identifier": "dQw4w9WgXcQ",
-                "isSeekable": true,
-                "author": "Example Artist",
-                "length": 200000,
-                "isStream": false,
-                "position": 0,
-                "title": "Example Track",
-                "uri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                "sourceName": "youtube",
-                "artworkUrl": null,
-                "isrc": null
-            },
-            "pluginInfo": {},
-            "userData": {}
+            "videoId": "dQw4w9WgXcQ",
+            "title": "Example Track",
+            "author": "Example Artist",
+            "lengthSeconds": 200
         }]);
         let video_result = json!({
             "videoId": "dQw4w9WgXcQ",
