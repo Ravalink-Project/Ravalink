@@ -42,7 +42,7 @@ impl YouTubePlugin {
     pub fn new(api_base: impl Into<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
-            .user_agent("RavaLink/0.1 (native YouTube source)")
+            .user_agent(format!("RavaLink/{} (native YouTube source)", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("valid default HTTP client");
         let api_base = api_base.into();
