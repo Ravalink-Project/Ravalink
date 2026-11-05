@@ -906,8 +906,23 @@ async fn update_player(
         object.remove("track");
         object.remove("encodedTrack");
         object.remove("identifier");
+        object.remove("paused");
+        object.remove("position");
+        object.remove("endTime");
     }
     if has_track_request && !no_replace_active {
+        normalized_update
+            .as_object_mut()
+            .expect("validated JSON object")
+            .insert(
+                "paused".to_owned(),
+                serde_json::json!(
+                    fields
+                        .get("paused")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                ),
+            );
         let (track, stream_url) = match resolve_player_track(&state, &fields).await {
             Ok(resolved) => resolved,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
@@ -992,20 +1007,28 @@ async fn update_player(
         let object = normalized_update
             .as_object_mut()
             .expect("validated JSON object");
+        object.remove("position");
         if encoded_track_is_null {
             object.remove("encodedTrack");
             object.insert("track".to_owned(), serde_json::Value::Null);
         }
     }
 
-    if fields.contains_key("endTime") {
+    if fields.contains_key("endTime") && !no_replace_active && !track_request_is_null {
         let end_time = fields.get("endTime").and_then(serde_json::Value::as_u64);
-        if let Err(error) = state
+        let active_track = state
             .audio_players
-            .set_end_time(&session_id, &guild_id, end_time)
+            .snapshot(&session_id, &guild_id)
             .await
-        {
-            return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+            .is_some_and(|snapshot| snapshot.track.is_some());
+        if has_track_request || active_track {
+            if let Err(error) = state
+                .audio_players
+                .set_end_time(&session_id, &guild_id, end_time)
+                .await
+            {
+                return api_error(StatusCode::BAD_REQUEST, &error.message, &path);
+            }
         }
     }
 
@@ -1031,12 +1054,9 @@ async fn update_player(
             .set_filters(&session_id, &guild_id, filters)
             .await;
     }
-    if let Some(paused) = fields.get("paused").and_then(serde_json::Value::as_bool)
-        && state
-            .audio_players
-            .snapshot(&session_id, &guild_id)
-            .await
-            .is_some_and(|snapshot| snapshot.track.is_some())
+    if !no_replace_active
+        && !track_request_is_null
+        && let Some(paused) = fields.get("paused").and_then(serde_json::Value::as_bool)
         && let Err(error) = state
             .audio_players
             .pause(&session_id, &guild_id, paused)
