@@ -2371,6 +2371,77 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn update_player_no_replace_skips_resolution_and_preserves_active_track() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        state
+            .players
+            .update(
+                &session.id,
+                "123456",
+                serde_json::json!({"track": {"encoded": "existing-track"}}),
+            )
+            .await;
+
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "123456".into())),
+            Query(PlayerUpdateQuery { no_replace: true }),
+            Json(serde_json::json!({
+                "identifier": "https://example.invalid/new-track.mp3"
+            })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(player["track"]["encoded"], "existing-track");
+        assert!(state.audio_players.snapshot(&session.id, "123456").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_player_rejects_conflicting_track_representations() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        for update in [
+            serde_json::json!({
+                "track": {"encoded": "abc"},
+                "identifier": "https://example.invalid/audio.mp3"
+            }),
+            serde_json::json!({
+                "encodedTrack": "abc",
+                "identifier": "https://example.invalid/audio.mp3"
+            }),
+            serde_json::json!({
+                "track": {
+                    "encoded": "abc",
+                    "identifier": "https://example.invalid/audio.mp3"
+                }
+            }),
+        ] {
+            let response = update_player(
+                authorized_headers(),
+                State(state.clone()),
+                Path((session.id.clone(), "123456".into())),
+                Query(PlayerUpdateQuery::default()),
+                Json(update),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert!(state.players.get(&session.id, "123456").await.is_none());
+            assert!(
+                state
+                    .audio_players
+                    .snapshot(&session.id, "123456")
+                    .await
+                    .is_none()
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn update_player_user_data_only_patch_preserves_current_track() {
         let state = state();
         let session = state.sessions.create(123, None).await;
