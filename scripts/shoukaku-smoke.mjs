@@ -54,12 +54,15 @@ async function main() {
       secure: false,
     });
 
-    const readyInfo = await Promise.race([
-      ready,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Shoukaku ready timed out")), 10_000),
-      ),
-    ]);
+    let readyTimer;
+    const timeout = new Promise((_, reject) => {
+      readyTimer = setTimeout(
+        () => reject(new Error("Shoukaku ready timed out")),
+        10_000,
+      );
+    });
+    const readyInfo = await Promise.race([ready, timeout]);
+    clearTimeout(readyTimer);
     if (readyInfo.name !== nodeName) {
       throw new Error(`Unexpected Shoukaku node ready event: ${readyInfo.name}`);
     }
