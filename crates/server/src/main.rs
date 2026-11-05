@@ -703,6 +703,9 @@ async fn delete_player(
     if state.sessions.get(&session_id).await.is_none() {
         return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
     }
+    if state.players.get(&session_id, &_guild_id).await.is_none() {
+        return api_error(StatusCode::NOT_FOUND, "Player not found", &path);
+    }
     if let Some(encoded) = state
         .players
         .get(&session_id, &_guild_id)
@@ -2281,6 +2284,19 @@ mod server_api_tests {
         assert_eq!(error["status"], 404);
         assert_eq!(error["message"], "Session not found");
         assert_eq!(error["path"], "/v4/sessions/missing-session");
+    }
+
+    #[tokio::test]
+    async fn delete_player_returns_not_found_for_missing_player() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = delete_player(
+            authorized_headers(),
+            State(state),
+            Path((session.id, "123456".into())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
