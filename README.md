@@ -8,7 +8,7 @@
   <p>Built for Discord music infrastructure. Designed to speak the Lavalink protocol without a JVM.</p>
 
   <p>
-    <a href="https://discord.gg/PBxB5eFNUp"><img src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" alt="Join the RavaLink Discord" /></a>
+    <a href="https://discord.com/invite/PBxB5eFNUp"><img src="https://discord.com/api/guilds/1566146315107442770/widget.png?style=banner2" alt="RavaLink Discord server — live members and online presence" /></a>
     <a href="https://github.com/Ravalink-Project/Ravalink"><img src="https://img.shields.io/badge/GitHub-Source%20code-181717?logo=github" alt="GitHub repository" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" /></a>
     <a href="https://github.com/Ravalink-Project/Ravalink/actions/workflows/rust.yml"><img src="https://github.com/Ravalink-Project/Ravalink/actions/workflows/rust.yml/badge.svg?branch=master" alt="Rust CI" /></a>
@@ -19,7 +19,7 @@
     <a href="#getting-started">Get started</a> ·
     <a href="COMPATIBILITY.md">Compatibility</a> ·
     <a href="docs/">Documentation</a> ·
-    <a href="https://discord.gg/PBxB5eFNUp">Discord</a>
+    <a href="#community-support">Discord community</a>
   </p>
 
 </div>
@@ -149,17 +149,19 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Please include reproduction steps, logs with secrets removed, and the exact client/provider versions when reporting compatibility issues.
 
+<a id="community-support"></a>
+
 ## Community & support
 
 Questions, development discussions, integration help and release feedback are welcome in the RavaLink Discord.
 
 <div align="center">
 
-  <a href="https://discord.gg/PBxB5eFNUp">
-    <img src="https://img.shields.io/badge/Join%20RavaLink%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the RavaLink Discord server" />
+  <a href="https://discord.com/invite/PBxB5eFNUp">
+    <img src="https://discord.com/api/guilds/1566146315107442770/widget.png?style=banner2" alt="RavaLink Discord server — live members and online presence" />
   </a>
 
-  <p><sub>Meet the community · Ask questions · Share feedback · Follow development</sub></p>
+  <p><sub>Live server widget · Member presence · Join the community</sub></p>
 
 </div>
 
