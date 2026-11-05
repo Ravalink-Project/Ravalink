@@ -8,6 +8,7 @@ port="${RAVALINK_SMOKE_PORT:-23391}"
 password="ravalink-smoke-test-password"
 log_file="$(mktemp)"
 tmpdir="$(mktemp -d)"
+response_file="$tmpdir/response"
 pid=""
 
 cleanup() {
@@ -58,10 +59,10 @@ assert_status() {
   local expected="$1"
   shift
   local actual
-  actual="$(curl --silent --show-error --output /tmp/ravalink-smoke-response --write-out '%{http_code}' "$@")"
+  actual="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' "$@")"
   if [[ "$actual" != "$expected" ]]; then
     echo "Expected HTTP $expected, got $actual for: $*" >&2
-    cat /tmp/ravalink-smoke-response >&2 || true
+    cat "$response_file" >&2 || true
     exit 1
   fi
 }
@@ -111,14 +112,13 @@ grep -q '"data":null' <<< "$load_result" || {
 
 # Missing sessions must serialize the standard Lavalink API error object.
 assert_status 404 "${auth[@]}" "$base/v4/sessions/ravalink-smoke-missing/players"
-grep -q '"status":404' /tmp/ravalink-smoke-response
-grep -q '"error":"Not Found"' /tmp/ravalink-smoke-response
-grep -q '"path":"/v4/sessions/ravalink-smoke-missing/players"' /tmp/ravalink-smoke-response
+grep -q '"status":404' "$response_file"
+grep -q '"error":"Not Found"' "$response_file"
+grep -q '"path":"/v4/sessions/ravalink-smoke-missing/players"' "$response_file"
 
 # Disabled metrics are not exposed.
 assert_status 404 "$base/metrics"
 
-rm -f /tmp/ravalink-smoke-response
 echo "RavaLink API smoke test passed."
 
 # Exercise an actual supported Lavalink client against the running server.
