@@ -211,7 +211,7 @@ fn invalid_player_field(
             value.as_u64().is_some()
         }),
         ("endTime", |value: &serde_json::Value| {
-            value.is_null() || value.as_u64().is_some()
+            value.is_null() || value.as_u64().is_some_and(|end_time| end_time > 0)
         }),
         ("volume", |value: &serde_json::Value| {
             value.as_u64().is_some_and(|volume| volume <= 1_000)
@@ -2261,7 +2261,7 @@ mod server_api_tests {
     }
 
     #[tokio::test]
-    async fn update_player_accepts_timescale_and_zero_end_time() {
+    async fn update_player_accepts_timescale_and_positive_end_time() {
         let state = state();
         let session = state.sessions.create(123, None).await;
         let response = update_player(
@@ -2270,7 +2270,7 @@ mod server_api_tests {
             Path((session.id.clone(), "guild".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({
-                "endTime": 0,
+                "endTime": 1_000,
                 "filters": {
                     "timescale": {"speed": 1.5, "pitch": 1.0, "rate": 1.0}
                 }
@@ -2283,6 +2283,24 @@ mod server_api_tests {
         let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(player["filters"]["timescale"]["speed"], 1.5);
         assert_eq!(player["guildId"], "guild");
+    }
+
+    #[tokio::test]
+    async fn update_player_rejects_zero_end_time_before_mutating_state() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({"endTime": 0})),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.players.get(&session.id, "guild").await.is_none());
+        assert!(state.audio_players.snapshot(&session.id, "guild").await.is_none());
     }
 
     #[tokio::test]
@@ -2403,7 +2421,7 @@ mod server_api_tests {
             ("track", serde_json::json!("not-an-object")),
             ("paused", serde_json::json!("true")),
             ("position", serde_json::json!(-1)),
-            ("endTime", serde_json::json!(-1)),
+            ("endTime", serde_json::json!(0)),
             ("volume", serde_json::json!(1001)),
             ("filters", serde_json::json!([])),
             ("voice", serde_json::json!([])),
