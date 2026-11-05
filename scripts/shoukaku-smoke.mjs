@@ -46,8 +46,7 @@ async function main() {
   });
   shoukaku.once("error", (name, error) => rejectReady(error));
 
-  try {
-    shoukaku.addNode({
+  shoukaku.addNode({
       name: nodeName,
       url: baseUrl.replace(/^https?:\/\//, ""),
       auth: password,
@@ -115,8 +114,7 @@ async function main() {
       throw new Error("Shoukaku player deletion failed");
     }
 
-    console.log("Shoukaku 4.3.0 compatibility smoke passed");
-  }
+  console.log("Shoukaku 4.3.0 compatibility smoke passed");
 }
 
 main()
