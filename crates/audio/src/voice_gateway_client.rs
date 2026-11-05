@@ -26,6 +26,13 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungsten
 
 type VoiceWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoiceWebSocketCloseInfo {
+    pub code: u16,
+    pub reason: String,
+    pub by_remote: bool,
+}
+
 /// A negotiated Discord voice connection. The websocket control loop runs in
 /// its own task while the caller drives the audio player's 20 ms cadence.
 pub struct DiscordVoiceConnection {
@@ -33,6 +40,8 @@ pub struct DiscordVoiceConnection {
     pub pipeline: VoicePacketPipeline,
     pub dave: Arc<Mutex<DaveVoiceController>>,
     connected: Arc<AtomicBool>,
+    gateway_open: Arc<AtomicBool>,
+    close_events: mpsc::UnboundedReceiver<VoiceWebSocketCloseInfo>,
     shutdown: watch::Sender<bool>,
     speaking_tx: mpsc::UnboundedSender<bool>,
 }
@@ -142,6 +151,8 @@ impl DiscordVoiceConnection {
                                 let transport = Arc::new(transport);
                                 let dave = Arc::new(Mutex::new(dave));
                                 let connected = Arc::new(AtomicBool::new(true));
+                                let gateway_open = Arc::new(AtomicBool::new(true));
+                                let (close_event_tx, close_events) = mpsc::unbounded_channel();
                                 let (shutdown, shutdown_rx) = watch::channel(false);
                                 tokio::spawn(run_voice_udp_keepalive(
                                     transport.clone(),
@@ -160,6 +171,8 @@ impl DiscordVoiceConnection {
                                     heartbeat,
                                     dave.clone(),
                                     connected.clone(),
+                                    gateway_open.clone(),
+                                    close_event_tx,
                                     shutdown_rx,
                                     speaking_rx,
                                     endpoint.to_owned(),
@@ -169,6 +182,8 @@ impl DiscordVoiceConnection {
                                     pipeline,
                                     dave,
                                     connected,
+                                    gateway_open,
+                                    close_events,
                                     shutdown,
                                     speaking_tx,
                                 });
@@ -199,6 +214,14 @@ impl DiscordVoiceConnection {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    pub fn is_gateway_connected(&self) -> bool {
+        self.gateway_open.load(Ordering::Acquire)
+    }
+
+    pub fn try_next_close_event(&mut self) -> Option<VoiceWebSocketCloseInfo> {
+        self.close_events.try_recv().ok()
     }
 
     pub fn set_speaking(&self, speaking: bool) -> Result<(), AudioError> {
@@ -246,6 +269,8 @@ async fn run_voice_gateway_socket(
     mut heartbeat: Interval,
     dave: Arc<Mutex<DaveVoiceController>>,
     connected: Arc<AtomicBool>,
+    gateway_open: Arc<AtomicBool>,
+    close_event_tx: mpsc::UnboundedSender<VoiceWebSocketCloseInfo>,
     mut shutdown: watch::Receiver<bool>,
     mut speaking_rx: mpsc::UnboundedReceiver<bool>,
     endpoint: String,
@@ -254,10 +279,20 @@ async fn run_voice_gateway_socket(
     let mut last_heartbeat_ack = tokio::time::Instant::now();
     loop {
         let mut connection_lost = false;
+        let mut close_info = VoiceWebSocketCloseInfo {
+            code: 1006,
+            reason: "Discord voice websocket connection was lost".to_owned(),
+            by_remote: true,
+        };
         'read: loop {
             let incoming = tokio::select! {
                 changed = shutdown.changed() => {
                     if changed.is_err() || *shutdown.borrow() {
+                        close_info = VoiceWebSocketCloseInfo {
+                            code: 1000,
+                            reason: String::new(),
+                            by_remote: false,
+                        };
                         break 'read;
                     }
                     continue;
@@ -324,6 +359,10 @@ async fn run_voice_gateway_socket(
                 }
                 Message::Close(frame) => {
                     tracing::debug!(?frame, "Discord voice websocket closed");
+                    if let Some(frame) = frame {
+                        close_info.code = u16::from(frame.code);
+                        close_info.reason = frame.reason.to_string();
+                    }
                     connection_lost = true;
                     break;
                 }
@@ -419,12 +458,18 @@ async fn run_voice_gateway_socket(
         }
 
         if *shutdown.borrow() || shutdown.has_changed().is_err() {
+            gateway_open.store(false, Ordering::Release);
+            let _ = close_event_tx.send(close_info);
             break;
         }
         if !connection_lost {
+            gateway_open.store(false, Ordering::Release);
+            let _ = close_event_tx.send(close_info);
             break;
         }
 
+        gateway_open.store(false, Ordering::Release);
+        let _ = close_event_tx.send(close_info);
         let mut retry_delay = Duration::from_secs(1);
         let mut resumed = false;
         loop {
@@ -435,6 +480,7 @@ async fn run_voice_gateway_socket(
                     heartbeat = resumed_heartbeat;
                     last_heartbeat_ack = tokio::time::Instant::now();
                     tracing::info!("Discord voice websocket session resumed");
+                    gateway_open.store(true, Ordering::Release);
                     resumed = true;
                     break;
                 }
@@ -463,6 +509,7 @@ async fn run_voice_gateway_socket(
             break;
         }
     }
+    gateway_open.store(false, Ordering::Release);
     connected.store(false, Ordering::Release);
 }
 
