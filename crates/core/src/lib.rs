@@ -361,6 +361,21 @@ mod player_store_tests {
     use serde_json::json;
 
     #[tokio::test]
+    async fn new_player_has_non_null_lavalink_voice_state() {
+        let store = PlayerStore::default();
+        let player = store.update("s", "g", json!({})).await;
+        assert_eq!(
+            player["voice"],
+            json!({
+                "token": "",
+                "endpoint": "",
+                "sessionId": "",
+                "channelId": null
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn player_updates_are_scoped_to_session_and_guild() {
         let store = PlayerStore::default();
         let player = store
