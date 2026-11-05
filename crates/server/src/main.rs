@@ -233,7 +233,10 @@ fn invalid_player_field(
     }
 
     if let Some(track) = fields.get("track").and_then(serde_json::Value::as_object) {
-        if track.get("identifier").is_some_and(|value| !value.is_string()) {
+        if track
+            .get("identifier")
+            .is_some_and(|value| !value.is_string())
+        {
             return Some("track.identifier");
         }
         if track
@@ -816,28 +819,28 @@ async fn update_player(
             );
         };
         let (Some(token), Some(endpoint), Some(session_id), Some(channel_id)) = (
-                voice.get("token").and_then(serde_json::Value::as_str),
-                voice.get("endpoint").and_then(serde_json::Value::as_str),
-                voice.get("sessionId").and_then(serde_json::Value::as_str),
-                voice.get("channelId").and_then(serde_json::Value::as_str),
-            ) else {
-                return api_error(
-                    StatusCode::BAD_REQUEST,
-                    "Voice state requires token, endpoint, sessionId and channelId strings",
-                    &path,
-                );
-            };
-            if token.trim().is_empty()
-                || endpoint.trim().is_empty()
-                || session_id.trim().is_empty()
-                || channel_id.trim().parse::<i64>().is_err()
-            {
-                return api_error(
-                    StatusCode::BAD_REQUEST,
-                    "Voice state requires non-empty token, endpoint, sessionId and a numeric channelId",
-                    &path,
-                );
-            }
+            voice.get("token").and_then(serde_json::Value::as_str),
+            voice.get("endpoint").and_then(serde_json::Value::as_str),
+            voice.get("sessionId").and_then(serde_json::Value::as_str),
+            voice.get("channelId").and_then(serde_json::Value::as_str),
+        ) else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "Voice state requires token, endpoint, sessionId and channelId strings",
+                &path,
+            );
+        };
+        if token.trim().is_empty()
+            || endpoint.trim().is_empty()
+            || session_id.trim().is_empty()
+            || channel_id.trim().parse::<i64>().is_err()
+        {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "Voice state requires non-empty token, endpoint, sessionId and a numeric channelId",
+                &path,
+            );
+        }
         Some(Some(DiscordVoiceState {
             token: token.to_owned(),
             endpoint: endpoint.to_owned(),
@@ -985,7 +988,10 @@ async fn update_player(
             .expect("validated JSON object");
         object.remove("identifier");
         object.remove("encodedTrack");
-        object.insert("position".to_owned(), serde_json::json!(initial_position_ms));
+        object.insert(
+            "position".to_owned(),
+            serde_json::json!(initial_position_ms),
+        );
         object.insert(
             "track".to_owned(),
             serde_json::to_value(track).expect("Track serializes to JSON"),
@@ -2431,7 +2437,13 @@ mod server_api_tests {
         let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
         let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(player["track"]["encoded"], "existing-track");
-        assert!(state.audio_players.snapshot(&session.id, "123456").await.is_none());
+        assert!(
+            state
+                .audio_players
+                .snapshot(&session.id, "123456")
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
