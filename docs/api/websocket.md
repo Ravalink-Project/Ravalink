@@ -1,20 +1,22 @@
 ---
-description: Lavalink WebSocket API documentation.
+description: Lavalink v4 WebSocket protocol targeted by RavaLink.
 ---
 
 # WebSocket API
+
+RavaLink implements the Lavalink v4 WebSocket session and event protocol. See the [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) for the current implementation status and known limitations.
 
 ## Opening a connection
 
 You can establish a WebSocket connection against the path `/v4/websocket`.
 
-When opening a websocket connection, you must supply 3 required headers:
+The reference Lavalink v4 handshake uses these headers:
 
 | Header Name     | Description                                     |
 |-----------------|-------------------------------------------------|
 | `Authorization` | The password you set in your Lavalink config    |
 | `User-Id`       | The user id of the bot                          |
-| `Client-Name`   | The name of the client in `NAME/VERSION` format |
+| `Client-Name`?  | The name of the client in `NAME/VERSION` format; recommended by RavaLink |
 | `Session-Id`? * | The id of the previous session to resume        |
 
 **\*For more information on resuming see [Resuming](index.md#resuming)**
