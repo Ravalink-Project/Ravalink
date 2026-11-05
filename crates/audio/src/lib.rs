@@ -4,8 +4,10 @@
 //! processor operates on interleaved floating-point PCM frames. Codec and
 //! Discord voice transport adapters can feed frames into this layer.
 
-use crate::voice_pcm::VoicePcmPacketizer;
+use crate::voice_pcm::{VoicePcmPacketizer, normalize_for_voice, VOICE_CHANNELS, VOICE_SAMPLE_RATE};
 use ravalink_protocol::{Filters, Omissible};
+use std::num::{NonZeroU16, NonZeroU32};
+use wsola::TimeStretch;
 
 pub mod dave;
 pub mod http_source;
@@ -767,6 +769,8 @@ pub struct NativePlayer {
     streamed_frames: Option<tokio::sync::mpsc::Receiver<Result<PcmFrame, AudioError>>>,
     next_frame_index: usize,
     processor: DspProcessor,
+    timescale: Option<TimeStretch>,
+    timescale_pitch_rate: f64,
     voice_packetizer: VoicePcmPacketizer,
     opus_encoder: Option<OpusFrameEncoder>,
     opus_complexity: u8,
@@ -795,6 +799,8 @@ impl NativePlayer {
             streamed_frames: None,
             next_frame_index: 0,
             processor: DspProcessor::new(filters),
+            timescale: None,
+            timescale_pitch_rate: 1.0,
             voice_packetizer: VoicePcmPacketizer::new(),
             opus_encoder: None,
             opus_complexity: opus_complexity.min(10),
@@ -824,7 +830,26 @@ impl NativePlayer {
     }
 
     pub fn set_filters(&mut self, filters: Filters) {
+        let timescale = present(&filters.timescale).and_then(Option::as_ref).cloned();
         self.processor.set_filters(filters);
+        self.voice_packetizer.clear();
+        self.timescale = None;
+        self.timescale_pitch_rate = 1.0;
+
+        if let Some(timescale) = timescale
+            && ((timescale.speed - 1.0).abs() > f64::EPSILON
+                || (timescale.pitch - 1.0).abs() > f64::EPSILON
+                || (timescale.rate - 1.0).abs() > f64::EPSILON)
+        {
+            let mut stretcher = TimeStretch::new(
+                NonZeroU32::new(VOICE_SAMPLE_RATE).expect("voice sample rate is non-zero"),
+                NonZeroU16::new(VOICE_CHANNELS).expect("voice channel count is non-zero"),
+            )
+            .expect("fixed WSOLA geometry is valid");
+            stretcher.set_tempo((timescale.speed / timescale.pitch) as f32);
+            self.timescale_pitch_rate = timescale.pitch * timescale.rate;
+            self.timescale = Some(stretcher);
+        }
     }
 
     pub fn load_decoded_track(
@@ -905,6 +930,7 @@ impl NativePlayer {
         self.position_ms = position_ms;
         self.voice_packetizer.clear();
         self.processor.reset_state();
+        if let Some(stretcher) = self.timescale.as_mut() { stretcher.reset(); }
         if let Some(encoder) = self.opus_encoder.as_mut() {
             encoder.reset()?;
         }
@@ -971,12 +997,56 @@ impl NativePlayer {
             }
             let Some(frame) = self.next_frame()? else {
                 if self.track.is_none() {
+                    self.flush_timescale()?;
+                    if let Some(frame) = self.voice_packetizer.pop_frame() {
+                        return Ok(Some(frame));
+                    }
                     self.voice_packetizer.clear();
                 }
                 return Ok(None);
             };
-            self.voice_packetizer.push(&frame)?;
+            self.push_voice_frame(&frame)?;
         }
+    }
+
+    fn push_voice_frame(&mut self, frame: &PcmFrame) -> Result<(), AudioError> {
+        let Some(stretcher) = self.timescale.as_mut() else {
+            self.voice_packetizer.push(frame)?;
+            return Ok(());
+        };
+
+        let adjusted_rate = (f64::from(frame.sample_rate) * self.timescale_pitch_rate).round();
+        if !adjusted_rate.is_finite() || adjusted_rate < 1.0 || adjusted_rate > f64::from(u32::MAX) {
+            return Err(AudioError::invalid("timescale pitch/rate produced an invalid sample rate"));
+        }
+        let mut pitched = frame.clone();
+        pitched.sample_rate = adjusted_rate as u32;
+        let normalized = normalize_for_voice(&pitched)?;
+        stretcher.push(&normalized.samples);
+        let stretched = stretcher.pull(usize::MAX).collect::<Vec<_>>();
+        if !stretched.is_empty() {
+            self.voice_packetizer.push(&PcmFrame {
+                samples: stretched,
+                channels: VOICE_CHANNELS,
+                sample_rate: VOICE_SAMPLE_RATE,
+            })?;
+        }
+        Ok(())
+    }
+
+    fn flush_timescale(&mut self) -> Result<(), AudioError> {
+        let Some(stretcher) = self.timescale.as_mut() else {
+            return Ok(());
+        };
+        let tail = stretcher.flush().collect::<Vec<_>>();
+        if !tail.is_empty() {
+            self.voice_packetizer.push(&PcmFrame {
+                samples: tail,
+                channels: VOICE_CHANNELS,
+                sample_rate: VOICE_SAMPLE_RATE,
+            })?;
+        }
+        Ok(())
     }
 
     pub fn next_frame(&mut self) -> Result<Option<PcmFrame>, AudioError> {
