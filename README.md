@@ -33,7 +33,7 @@
 
 RavaLink is an independent, native Rust audio node built to integrate with the existing Lavalink v4 ecosystem. It aims to let Discord bot developers keep their current Lavalink client and connect to a RavaLink node by changing the node endpoint and credentials.
 
-The server is implemented as a Rust workspace. It does not require Java, a JVM, Kotlin, Gradle, Lavaplayer or JNI at runtime.
+The server is implemented as a Rust workspace. It does not require Java, a JVM, Kotlin, Gradle, Lavaplayer or JNI at runtime. The previous Java implementation is preserved separately on the [java branch](https://github.com/Ravalink-Project/Ravalink/tree/java); the default branch is the native Rust project.
 
 **Our goal:** make a dependable, observable and extensible audio node while preserving the protocol and workflows Lavalink users already know.
 
