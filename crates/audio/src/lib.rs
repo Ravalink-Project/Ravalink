@@ -1208,11 +1208,6 @@ impl AudioPipeline for NativePlayer {
     }
 
     fn pause(&mut self, paused: bool) -> Result<(), AudioError> {
-        if self.track.is_none() {
-            return Err(AudioError::invalid(
-                "cannot pause a player without an active track",
-            ));
-        }
         self.paused = paused;
         Ok(())
     }
