@@ -170,10 +170,26 @@ struct RoutePlannerFreeAddress {
     _address: String,
 }
 
+fn parse_query_bool(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn deserialize_query_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    parse_query_bool(&value).ok_or_else(|| serde::de::Error::custom("expected true or false"))
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct PlayerUpdateQuery {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_query_bool")]
     no_replace: bool,
 }
 
@@ -2060,6 +2076,15 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[test]
+    fn player_update_no_replace_query_accepts_case_insensitive_booleans() {
+        assert_eq!(parse_query_bool("true"), Some(true));
+        assert_eq!(parse_query_bool("True"), Some(true));
+        assert_eq!(parse_query_bool("FALSE"), Some(false));
+        assert_eq!(parse_query_bool("False"), Some(false));
+        assert_eq!(parse_query_bool("yes"), None);
     }
 
     #[test]
