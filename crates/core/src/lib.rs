@@ -430,11 +430,34 @@ mod player_store_tests {
     }
 
     #[tokio::test]
-    async fn position_updates_the_player_state_object() {
+    async fn position_updates_only_an_existing_track_state() {
         let store = PlayerStore::default();
+        let empty = store.update("s", "g", json!({"position": 1250})).await;
+        assert_eq!(empty["state"]["position"], 0);
+
+        store
+            .update(
+                "s",
+                "g",
+                json!({"track": {"encoded": "abc", "info": {"position": 250}}}),
+            )
+            .await;
         let player = store.update("s", "g", json!({"position": 1250})).await;
         assert_eq!(player["state"]["position"], 1250);
         assert!(player.get("position").is_none());
+    }
+
+    #[tokio::test]
+    async fn new_track_initializes_state_position_from_track_info() {
+        let store = PlayerStore::default();
+        let player = store
+            .update(
+                "s",
+                "g",
+                json!({"track": {"encoded": "abc", "info": {"position": 500}}}),
+            )
+            .await;
+        assert_eq!(player["state"]["position"], 500);
     }
 
     #[tokio::test]
