@@ -2303,7 +2303,13 @@ mod server_api_tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(state.players.get(&session.id, "guild").await.is_none());
-        assert!(state.audio_players.snapshot(&session.id, "guild").await.is_none());
+        assert!(
+            state
+                .audio_players
+                .snapshot(&session.id, "guild")
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
