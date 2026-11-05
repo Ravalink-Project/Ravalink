@@ -11,12 +11,19 @@ tmpdir="$(mktemp -d)"
 pid=""
 
 cleanup() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    echo "RavaLink smoke server log:" >&2
+    cat "$log_file" >&2 || true
+  fi
   if [[ -n "$pid" ]]; then
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   fi
   rm -f "$log_file"
   rm -rf "$tmpdir"
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -116,10 +123,10 @@ echo "RavaLink API smoke test passed."
 
 # Exercise an actual supported Lavalink client against the running server.
 python3 -m venv "$tmpdir/wavelink-venv"
-"$tmpdir/wavelink-venv/bin/python" -m pip install --disable-pip-version-check --quiet "wavelink==3.5.2"
-"$tmpdir/wavelink-venv/bin/python" scripts/wavelink-smoke.py "http://127.0.0.1:$port" "$password"
+timeout 120s "$tmpdir/wavelink-venv/bin/python" -m pip install --disable-pip-version-check --quiet "wavelink==3.5.2"
+timeout 60s "$tmpdir/wavelink-venv/bin/python" scripts/wavelink-smoke.py "http://127.0.0.1:$port" "$password"
 
 # Exercise the real Shoukaku 4.3.0 Node.js client as well.
-npm install --prefix "$tmpdir/shoukaku-venv" --no-audit --no-fund --silent "shoukaku@4.3.0"
+timeout 120s npm install --prefix "$tmpdir/shoukaku-venv" --no-audit --no-fund --silent "shoukaku@4.3.0"
 cp scripts/shoukaku-smoke.mjs "$tmpdir/shoukaku-venv/shoukaku-smoke.mjs"
-node "$tmpdir/shoukaku-venv/shoukaku-smoke.mjs" "http://127.0.0.1:$port" "$password"
+timeout 60s node "$tmpdir/shoukaku-venv/shoukaku-smoke.mjs" "http://127.0.0.1:$port" "$password"
