@@ -1,7 +1,7 @@
 ---
 template: home.html
 title: Home
-description: Standalone audio sending node based on Lavaplayer.
+description: A native Rust audio node for the Lavalink v4 ecosystem.
 hide:
   - footer
   - navigation
@@ -10,51 +10,56 @@ hide:
   - path
 ---
 
-## Features
+> [!WARNING]
+> RavaLink is in pre-release development. Full Lavalink v4 compatibility and production readiness have not yet been declared. See the [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) and [RC1 acceptance checklist](https://github.com/Ravalink-Project/Ravalink/blob/master/RC1_ACCEPTANCE.md).
+
+## Built for the Lavalink ecosystem
 
 ::cards::
 
-- title: Powered by Lavaplayer
-  icon: ':material-music:'
-  url: https://github.com/lavalink-devs/lavaplayer
-- title: Minimal CPU/memory footprint
-  icon: ':octicons-cpu-16:'
-- title: Twitch/YouTube stream support
-  icon: ':material-youtube:'
-- title: Event system
-  icon: ':fontawesome-solid-right-left:'
-  url: api/websocket.md
-- title: Seeking
-  icon: ':material-fast-forward-10:'
-  url: api/rest.md#update-player
-- title: Volume control
-  icon: ':material-volume-high:'
-  url: api/rest.md#update-player
-- title: Full REST API
+- title: Native Rust runtime
+  icon: ':material-language-rust:'
+  url: https://github.com/Ravalink-Project/Ravalink/blob/master/ARCHITECTURE.md
+- title: Lavalink v4 REST API
   icon: ':material-api:'
   url: api/rest.md
-- title: Statistics
-  icon: ':octicons-graph-16:'
-  url: api/rest.md#get-lavalink-stats
-- title: Basic authentication
-  icon: ':material-lock:'
-  url: api/rest.md
+- title: WebSocket sessions
+  icon: ':material-swap-horizontal:'
+  url: api/websocket.md
+- title: Discord voice and DAVE
+  icon: ':material-headphones:'
+- title: Audio DSP and Timescale
+  icon: ':material-waveform:'
+- title: Built-in source providers
+  icon: ':material-music-box-multiple:'
 - title: Prometheus metrics
   icon: ':simple-prometheus:'
-  url: https://prometheus.io/
-- title: Docker images
+  url: configuration/
+- title: Docker deployment
   icon: ':simple-docker:'
   url: getting-started/docker.md
-- title: Plugin support
-  icon: ':material-power-plug-outline:'
+- title: Native plugin extensions
+  icon: ':material-puzzle:'
   url: plugins.md
 
 ::/cards::
 
-## Found a Bug?
+## Get started
 
-If you found a bug, please report it on the [issue tracker](https://github.com/lavalink-devs/Lavalink/issues/new?labels=bug&template=bug_report.md).
+Build RavaLink from source using the current stable Rust toolchain:
 
-## Need Help?
+~~~bash
+git clone https://github.com/Ravalink-Project/Ravalink.git
+cd Ravalink
+cargo build --release -p ravalink-server
+~~~
 
-Join the [Lavalink support Discord]({{ discord_help }}) or open a [GitHub discussion](https://github.com/lavalink-devs/Lavalink/discussions/new?category=q-a) for help or questions.
+Then configure a secure node password using the [configuration guide](configuration/).
+
+## Compatibility first
+
+RavaLink aims to work with existing Lavalink v4 clients. Automated smoke scenarios currently exercise Wavelink and Shoukaku, but these checks do not establish complete API compatibility. The [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) documents implemented behavior and known limitations.
+
+## Join the community
+
+Need help, want to contribute or have compatibility feedback? Join the [RavaLink Discord server](https://discord.gg/PBxB5eFNUp) or browse the [GitHub repository](https://github.com/Ravalink-Project/Ravalink).
