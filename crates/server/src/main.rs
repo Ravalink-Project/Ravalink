@@ -1709,38 +1709,48 @@ async fn websocket(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Response {
-    if let Some(response) = authorization_failure(&headers, &state) {
-        return response;
+    let authorization = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok());
+    if authorization != Some(state.password.as_str()) {
+        return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
     }
 
     let user_id = match headers
         .get("user-id")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok())
+        .filter(|user_id| *user_id != 0)
     {
         Some(value) => value,
         None => {
             return (StatusCode::BAD_REQUEST, "Missing or invalid User-Id header").into_response();
         }
     };
-    let client_name = match client_name_header(&headers) {
-        Some(value) => Some(value),
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                "Missing or invalid Client-Name header",
-            )
-                .into_response();
-        }
-    };
+    // Client-Name is recommended by Lavalink v4 but remains optional.
+    let client_name = client_name_header(&headers);
     let requested_session = headers
         .get("session-id")
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
+    let session_resumed = if let Some(session_id) = requested_session.as_deref() {
+        state
+            .sessions
+            .get(session_id)
+            .await
+            .is_some_and(|session| session.user_id == user_id && session.can_resume(Instant::now()))
+    } else {
+        false
+    };
 
-    ws.on_upgrade(move |socket| {
+    let mut response = ws.on_upgrade(move |socket| {
         handle_socket(socket, state, user_id, client_name, requested_session)
-    })
+    });
+    response.headers_mut().insert(
+        "session-resumed",
+        axum::http::HeaderValue::from_static(if session_resumed { "true" } else { "false" }),
+    );
+    response
 }
 
 async fn handle_socket(
@@ -1961,7 +1971,7 @@ mod server_api_tests {
     }
 
     #[test]
-    fn websocket_client_name_header_is_required_and_non_empty() {
+    fn websocket_client_name_header_is_optional_and_trimmed() {
         let mut headers = HeaderMap::new();
         assert_eq!(client_name_header(&headers), None);
 
