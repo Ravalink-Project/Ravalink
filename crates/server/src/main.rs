@@ -1839,8 +1839,9 @@ async fn websocket(
     let Some(user_id) = user_id_header(&headers) else {
         return (StatusCode::BAD_REQUEST, "Missing or invalid User-Id header").into_response();
     };
-    // Client-Name is recommended by Lavalink v4 but remains optional.
-    let client_name = client_name_header(&headers);
+    let Some(client_name) = client_name_header(&headers) else {
+        return (StatusCode::BAD_REQUEST, "Missing or invalid Client-Name header").into_response();
+    };
     let requested_session = headers
         .get("session-id")
         .and_then(|v| v.to_str().ok())
@@ -2106,7 +2107,7 @@ mod server_api_tests {
     }
 
     #[test]
-    fn websocket_client_name_header_is_optional_and_trimmed() {
+    fn websocket_client_name_header_is_trimmed_and_rejects_blank_values() {
         let mut headers = HeaderMap::new();
         assert_eq!(client_name_header(&headers), None);
 
@@ -2299,6 +2300,10 @@ mod server_api_tests {
             "user-id",
             tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
         );
+        request.headers_mut().insert(
+            "client-name",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("RavaLink-Contract-Test/1.0"),
+        );
 
         let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
         assert_eq!(response.headers().get("session-resumed").unwrap(), "false");
@@ -2338,6 +2343,10 @@ mod server_api_tests {
         resume_request.headers_mut().insert(
             "user-id",
             tokio_tungstenite::tungstenite::http::HeaderValue::from_static("123"),
+        );
+        resume_request.headers_mut().insert(
+            "client-name",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_static("RavaLink-Contract-Test/1.0"),
         );
         resume_request.headers_mut().insert(
             "session-id",
