@@ -194,7 +194,7 @@ mod tests {
                 .contains(&serde_json::json!("vibrato"))
         );
         assert!(
-            !value["filters"]
+            value["filters"]
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!("timescale"))
