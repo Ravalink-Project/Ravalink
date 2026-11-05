@@ -1043,7 +1043,10 @@ fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
 mod tests {
     use super::*;
 
-    async fn mock_youtube_api(search_result: serde_json::Value, video_result: serde_json::Value) -> String {
+    async fn mock_youtube_api(
+        search_result: serde_json::Value,
+        video_result: serde_json::Value,
+    ) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1170,7 +1173,11 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(error.message.contains("no sufficiently close YouTube match"));
+        assert!(
+            error
+                .message
+                .contains("no sufficiently close YouTube match")
+        );
     }
 
     #[test]
