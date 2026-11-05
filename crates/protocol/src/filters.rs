@@ -238,7 +238,12 @@ mod tests {
 
         let filters: Filters = serde_json::from_value(value.clone()).unwrap();
         assert!(matches!(filters.timescale, Omissible::Present(Some(_))));
-        assert_eq!(serde_json::to_value(filters).unwrap(), value);
+        let serialized = serde_json::to_value(filters).unwrap();
+        let gain = serialized["equalizer"][0]["gain"].as_f64().unwrap();
+        assert!((gain - 0.2).abs() < 1e-6);
+        let mut expected = value;
+        expected["equalizer"][0]["gain"] = serialized["equalizer"][0]["gain"].clone();
+        assert_eq!(serialized, expected);
     }
 
     #[test]
