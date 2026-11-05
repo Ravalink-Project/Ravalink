@@ -836,7 +836,9 @@ impl NativePlayer {
     }
 
     pub fn set_filters(&mut self, filters: Filters) {
-        let timescale = present(&filters.timescale).and_then(Option::as_ref).cloned();
+        let timescale = present(&filters.timescale)
+            .and_then(Option::as_ref)
+            .cloned();
         self.processor.set_filters(filters);
         self.configure_timescale(timescale);
     }
