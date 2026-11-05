@@ -281,7 +281,8 @@ impl PlayerStore {
                         }
                     }
                     "filters" if value.is_object() => player["filters"] = value.clone(),
-                    _ => player[name] = value.clone(),
+                    "volume" | "paused" | "voice" => player[name] = value.clone(),
+                    _ => continue,
                 }
             }
 
@@ -400,6 +401,16 @@ mod player_store_tests {
         let listed = store.list("s").await;
         assert_eq!(listed.len(), 1);
         assert!(listed[0]["state"]["time"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn unknown_update_fields_are_not_echoed_in_player_state() {
+        let store = PlayerStore::default();
+        let player = store
+            .update("s", "g", json!({"unknownField": "ignore-me", "volume": 80}))
+            .await;
+        assert_eq!(player["volume"], 80);
+        assert!(player.get("unknownField").is_none());
     }
 
     #[tokio::test]
