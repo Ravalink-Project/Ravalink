@@ -860,16 +860,6 @@ async fn update_player(
     } else {
         None
     };
-    if let Some(end_time) = fields.get("endTime").filter(|value| !value.is_null())
-        && end_time.as_u64().is_none_or(|value| value == 0)
-    {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "End time must be greater than 0",
-            &path,
-        );
-    }
-
     // Validate and deserialize filters before mutating playback state. A PATCH
     // containing an unsupported filter must not start/replace a track and then
     // fail halfway through the request.
@@ -878,15 +868,24 @@ async fn update_player(
             Ok(filters) => filters,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error.to_string(), &path),
         };
-        if matches!(
-            filters.timescale,
-            ravalink_protocol::Omissible::Present(Some(_))
-        ) {
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                "The timescale filter is not implemented by the native audio engine",
-                &path,
-            );
+        if let ravalink_protocol::Omissible::Present(Some(timescale)) = &filters.timescale {
+            let tempo = timescale.speed / timescale.pitch;
+            let pitch_rate = timescale.pitch * timescale.rate;
+            if !timescale.speed.is_finite()
+                || !timescale.pitch.is_finite()
+                || !timescale.rate.is_finite()
+                || timescale.speed <= 0.0
+                || timescale.pitch <= 0.0
+                || timescale.rate <= 0.0
+                || !(0.25..=4.0).contains(&tempo)
+                || !(0.25..=4.0).contains(&pitch_rate)
+            {
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "Timescale values must be positive and their effective tempo and pitch/rate must be between 0.25 and 4.0",
+                    &path,
+                );
+            }
         }
         if !filters.plugin_filters.is_empty() {
             return api_error(
