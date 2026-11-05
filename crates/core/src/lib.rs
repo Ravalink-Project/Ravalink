@@ -61,6 +61,15 @@ impl SessionStore {
         self.sessions.read().await.get(id).cloned()
     }
 
+    /// Checks whether a session can be resumed without consuming its resume state.
+    pub async fn can_resume(&self, id: &str, user_id: u64) -> bool {
+        self.sessions
+            .read()
+            .await
+            .get(id)
+            .is_some_and(|session| session.user_id == user_id && session.can_resume(Instant::now()))
+    }
+
     /// Finds a resumable session and atomically marks it as connected again.
     pub async fn resume(&self, id: &str, user_id: u64) -> Option<Session> {
         let now = Instant::now();
@@ -165,6 +174,20 @@ mod tests {
 
         let resumed = store.resume(&session.id, 123).await.unwrap();
         assert!(resumed.disconnected_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn can_resume_checks_user_and_deadline_without_consuming_session() {
+        let store = SessionStore::default();
+        let session = store.create(123, None).await;
+        store.update(&session.id, Some(true), Some(120)).await.unwrap();
+        store.disconnect(&session.id).await;
+
+        assert!(store.can_resume(&session.id, 123).await);
+        assert!(!store.can_resume(&session.id, 999).await);
+        assert!(store.can_resume(&session.id, 123).await);
+        assert!(store.resume(&session.id, 123).await.is_some());
+        assert!(!store.can_resume(&session.id, 123).await);
     }
 
     #[tokio::test]
