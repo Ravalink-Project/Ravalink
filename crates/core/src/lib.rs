@@ -289,7 +289,11 @@ impl PlayerStore {
                 let position = fields
                     .get("position")
                     .cloned()
-                    .or_else(|| player["track"]["info"]["position"].as_u64().map(json!))
+                    .or_else(|| {
+                        player["track"]["info"]["position"]
+                            .as_u64()
+                            .map(|position| json!(position))
+                    })
                     .unwrap_or_else(|| json!(0));
                 player["state"]["position"] = position;
             } else if player["track"].is_object()
