@@ -21,8 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Block releases with unresolved compatibility rows
-        run: bash scripts/check-stable-readiness.sh
+      - name: Check release-candidate or stable readiness
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-rc.* ]]; then
+            bash scripts/check-rc1-readiness.sh
+          else
+            bash scripts/check-stable-readiness.sh
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -88,6 +93,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
           files: |
             dist/ravalink-linux-x86_64
             dist/ravalink-linux-aarch64
