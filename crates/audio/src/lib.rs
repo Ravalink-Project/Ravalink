@@ -818,6 +818,9 @@ impl NativePlayer {
     /// Take a track that ended naturally during audio processing.
     /// Explicit stops and replacements do not populate this slot.
     pub fn take_completed_track(&mut self) -> Option<AudioTrack> {
+        if self.voice_packetizer.pending_frames() > 0 {
+            return None;
+        }
         let completed = self.completed_track.take();
         if completed.is_some() {
             self.decoded_frames.clear();
