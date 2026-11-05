@@ -1,114 +1,182 @@
 # RavaLink
 
-RavaLink is a native Rust audio node targeting drop-in compatibility with the
-Lavalink v4 server API. The goal is to let existing clients such as Wavelink,
-Lavalink.py, Shoukaku and discord-player connect by changing only the node
-address.
+<div align="center">
 
-**RavaLink is under active development and is not yet a drop-in replacement.**
-See [COMPATIBILITY.md](COMPATIBILITY.md) for the implementation status and
-known compatibility gaps.
+  <img src="docs/assets/logo.svg" alt="RavaLink" width="180" />
 
-## Native runtime
+  <h3>A native Rust audio node for the Lavalink v4 ecosystem.</h3>
+  <p>Built for Discord music infrastructure. Designed to speak the Lavalink protocol without a JVM.</p>
 
-The Rust implementation is designed to run without:
+  <p>
+    <a href="https://discord.gg/PBxB5eFNUp"><img src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" alt="Join the RavaLink Discord" /></a>
+    <a href="https://github.com/Ravalink-Project/Ravalink"><img src="https://img.shields.io/badge/GitHub-Source%20code-181717?logo=github" alt="GitHub repository" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" /></a>
+    <a href="https://github.com/Ravalink-Project/Ravalink/actions/workflows/rust.yml"><img src="https://github.com/Ravalink-Project/Ravalink/actions/workflows/rust.yml/badge.svg?branch=master" alt="Rust CI" /></a>
+    <a href="https://github.com/Ravalink-Project/Ravalink/actions/workflows/build.yml"><img src="https://github.com/Ravalink-Project/Ravalink/actions/workflows/build.yml/badge.svg?branch=master" alt="Native build CI" /></a>
+  </p>
 
-- Java or a JVM
-- Kotlin or Gradle
-- Lavaplayer
-- JNI bridges
+  <p>
+    <a href="#getting-started">Get started</a> ·
+    <a href="COMPATIBILITY.md">Compatibility</a> ·
+    <a href="docs/">Documentation</a> ·
+    <a href="https://discord.gg/PBxB5eFNUp">Discord</a>
+  </p>
 
-The repository is a single Cargo workspace. Internal crates are modules of one
-product, not separate repositories.
+</div>
 
-## Build
+---
 
-Requirements: a current stable Rust toolchain.
+> [!WARNING]
+> **RavaLink is currently in pre-release development.** It is not yet declared a fully compatible, production-ready drop-in replacement for Lavalink. Check the [compatibility ledger](COMPATIBILITY.md) and [RC1 acceptance checklist](RC1_ACCEPTANCE.md) before evaluating it.
 
-```bash
-cargo build --workspace
-cargo test --workspace
+## About
+
+RavaLink is an independent, native Rust audio node built to integrate with the existing Lavalink v4 ecosystem. It aims to let Discord bot developers keep their current Lavalink client and connect to a RavaLink node by changing the node endpoint and credentials.
+
+The server is implemented as a Rust workspace. It does not require Java, a JVM, Kotlin, Gradle, Lavaplayer or JNI at runtime.
+
+**Our goal:** make a dependable, observable and extensible audio node while preserving the protocol and workflows Lavalink users already know.
+
+## Project highlights
+
+The codebase currently includes the following implementation areas. Their presence does not imply that every upstream behavior has passed compatibility acceptance; see [COMPATIBILITY.md](COMPATIBILITY.md) for the precise status and limitations.
+
+- **Lavalink v4 interface** — HTTP REST endpoints, authenticated WebSocket sessions, player lifecycle and event serialization.
+- **Native audio pipeline** — Symphonia-based demuxing/decoding, bounded PCM queues, DSP processing, resampling and Opus encoding.
+- **Discord voice transport** — Gateway voice negotiation, RTP packetization, encryption and DAVE-related protocol handling.
+- **Built-in providers** — YouTube, LavaSrc integrations and LavaSearch functionality.
+- **Extension model** — Rust plugin interfaces and an optional external-process JSON protocol.
+- **Operations** — TOML/environment configuration, structured logs, Docker support and optional Prometheus metrics.
+- **Resource limits** — Bounded queues and caches intended to keep memory use predictable under load.
+
+## Client ecosystem
+
+RavaLink is designed around the Lavalink v4 protocol rather than a RavaLink-specific client API. The project currently runs compatibility smoke scenarios with:
+
+| Client | Runtime | Smoke status |
+|---|---|---|
+| [Wavelink](https://github.com/PythonistaGuild/Wavelink) | Python | Automated smoke test |
+| [Shoukaku](https://github.com/Deivu/Shoukaku) | Node.js | Automated smoke test |
+
+These smoke tests are useful integration checks, not proof that every API operation or edge case is compatible. Broader contract coverage and real Discord acceptance testing remain part of the release process.
+
+## Getting started
+
+### Requirements
+
+- A current stable Rust toolchain
+- OpenSSL for generating a secure password
+- Optional: Docker and Docker Compose for container deployment
+
+### Build from source
+
+~~~bash
+git clone https://github.com/Ravalink-Project/Ravalink.git
+cd Ravalink
+
+cargo build --workspace --release
+cargo test --workspace --all-targets
+
 export RAVALINK_PASSWORD="$(openssl rand -hex 32)"
-cargo run -p ravalink-server
-```
+cargo run --release -p ravalink-server
+~~~
 
-The server listens on `0.0.0.0:2333` by default. A password of at least
-16 characters is mandatory. RavaLink refuses to start with an empty, short,
-or known example password.
+By default, the server listens on 0.0.0.0:2333.
 
-## Configuration
+A password of at least 16 characters is required. RavaLink refuses to start with an empty, short or known example password.
 
-Configuration is loaded from `config/ravalink.toml` by default, or from
-`RAVALINK_CONFIG` when explicitly set. Environment variables override file values:
+### Docker
 
-- `RAVALINK_ADDRESS`
-- `RAVALINK_PORT`
-- `RAVALINK_PASSWORD`
-- `RAVALINK_PLAYER_UPDATE_INTERVAL` (default: 5 seconds)
-- `RAVALINK_LOG_LEVEL`
-- `RAVALINK_AUDIO_BUFFER_DURATION_MS`
-- `RAVALINK_AUDIO_FRAME_BUFFER_DURATION_MS`
-- `RAVALINK_AUDIO_OPUS_ENCODING_QUALITY`
-- `RAVALINK_AUDIO_RESAMPLING_QUALITY`
-- `RAVALINK_AUDIO_MAX_SOURCE_DOWNLOAD_BYTES` (default: 134217728)
-- `RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES` (default: 268435456; compressed source cache and aggregate active seek-source cache)
-- `RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES` (default: 268435456; active native players)
-- `RAVALINK_METRICS_PROMETHEUS_ENABLED`
-- `RAVALINK_METRICS_PROMETHEUS_ENDPOINT`
+~~~bash
+git clone https://github.com/Ravalink-Project/Ravalink.git
+cd Ravalink
 
-Built-in provider configuration:
-- `RAVALINK_YOUTUBE_API_BASE` (comma-separated Invidious-compatible API failover URLs)
-- `RAVALINK_SPOTIFY_CLIENT_ID` and `RAVALINK_SPOTIFY_CLIENT_SECRET` (Spotify search and collection API)
-- `RAVALINK_APPLE_MUSIC_TOKEN` (Apple Music playlist catalog API)
-
-**Security:** replace the example/default password with a long random secret before exposing the node to the internet. The Prometheus endpoint is unauthenticated when enabled; restrict it at the firewall or reverse proxy.
-
-Prometheus metrics are disabled by default. Enable them with `[metrics].prometheus_enabled = true` in the TOML file and optionally change `[metrics].prometheus_endpoint` (default: `/metrics`). The endpoint is intentionally unauthenticated for Prometheus scraping; restrict access at the network or reverse-proxy layer.
-
-A sample is available at [config/ravalink.example.toml](config/ravalink.example.toml).
-
-## Docker
-
-A native multi-stage image and Compose file are included:
-
-```sh
 cp config/ravalink.example.toml ravalink.toml
 export RAVALINK_PASSWORD="$(openssl rand -hex 32)"
 docker compose up -d --build
-```
+~~~
 
-The default Compose port binding is localhost-only. See [Docker deployment](docs/getting-started/docker.md) before exposing the node publicly.
+The default Compose binding is localhost-only. Read the [Docker deployment guide](docs/getting-started/docker.md) before exposing the node outside your machine.
 
-## Project direction
+### Configuration
 
-The implementation already includes a bounded progressive source pipeline, a native
-audio decode/encode path, Discord voice transport and the built-in provider/plugin
-crates. These components still require systematic contract and failure-path
-coverage; their presence in the codebase is not, by itself, proof of full
-Lavalink compatibility.
+RavaLink loads config/ravalink.toml by default. Set RAVALINK_CONFIG to use another file. Environment variables override values from the TOML configuration.
 
-The pre-RC1 work is focused on:
+Common settings:
 
-1. Completing and verifying the full public Lavalink v4 REST and WebSocket contract,
-   including response schemas, status codes, events, session behavior and edge cases.
-2. Running compatibility scenarios against upstream Lavalink v4 and supported client
-   libraries, with no RavaLink-specific client changes.
-3. Closing the remaining audio, source, provider, voice/DAVE and plugin behavior gaps
-   that can be validated in automated tests.
-4. Exercising resource limits, cancellation, malformed input, provider failures and
-   reconnect paths in repeatable tests.
-5. Keeping Linux x86_64, Linux ARM64 and Docker builds continuously validated on
-   the active `master` branch.
+| Variable | Purpose |
+|---|---|
+| RAVALINK_ADDRESS | Bind address |
+| RAVALINK_PORT | HTTP/WebSocket port |
+| RAVALINK_PASSWORD | Node authentication secret |
+| RAVALINK_LOG_LEVEL | Log verbosity |
+| RAVALINK_PLAYER_UPDATE_INTERVAL | Player update interval |
+| RAVALINK_METRICS_PROMETHEUS_ENABLED | Enable Prometheus metrics |
+| RAVALINK_METRICS_PROMETHEUS_ENDPOINT | Metrics route |
 
-The first release candidate is intended to be a usable test build, not a feature
-preview: the base Lavalink v4 API and all advertised core operations must be
-implemented and covered by automated tests before RC1. Real Discord guild,
-provider-account and network-condition acceptance testing will then be performed
-during the RC cycle.
+Provider credentials and advanced audio/resource settings are documented in the [example configuration](config/ravalink.example.toml) and [configuration reference](docs/configuration/).
 
-Rust itself is not treated as proof of performance. Benchmarks must compare both
-nodes on the same hardware and workloads.
+> [!IMPORTANT]
+> Generate a unique, long password before deployment. The optional Prometheus endpoint does not provide authentication by itself; restrict it using your firewall or reverse proxy.
 
-## Release readiness
+## Documentation
 
-See [STABLE_RELEASE_CHECKLIST.md](STABLE_RELEASE_CHECKLIST.md) before publishing a stable release.
+- [Getting started](docs/getting-started/)
+- [Configuration](docs/configuration/)
+- [Docker deployment](docs/getting-started/docker.md)
+- [REST API](docs/api/rest.md)
+- [WebSocket API](docs/api/websocket.md)
+- [Plugin system](docs/plugins.md)
+- [Architecture overview](ARCHITECTURE.md)
+- [Compatibility ledger and known limitations](COMPATIBILITY.md)
+- [Changelog](CHANGELOG.md)
+- [RC1 acceptance checklist](RC1_ACCEPTANCE.md)
+
+## Development
+
+Contributions, bug reports, compatibility findings and documentation improvements are welcome.
+
+1. Read the [architecture overview](ARCHITECTURE.md) and [compatibility ledger](COMPATIBILITY.md).
+2. Open an issue to discuss significant changes before starting implementation.
+3. Keep changes focused and include regression tests for behavior changes.
+4. Run the checks before submitting a pull request:
+
+~~~bash
+cargo fmt --all -- --check
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+~~~
+
+Please include reproduction steps, logs with secrets removed, and the exact client/provider versions when reporting compatibility issues.
+
+## Community & support
+
+Questions, development discussions, integration help and release feedback are welcome in the RavaLink Discord.
+
+<div align="center">
+
+  <a href="https://discord.gg/PBxB5eFNUp">
+    <img src="https://img.shields.io/badge/Join%20RavaLink%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the RavaLink Discord server" />
+  </a>
+
+  <p><sub>Meet the community · Ask questions · Share feedback · Follow development</sub></p>
+
+</div>
+
+For bugs or feature proposals, use [GitHub Issues](https://github.com/Ravalink-Project/Ravalink/issues) when repository issue tracking is enabled, or start a discussion in Discord.
+
+## Release status
+
+The first planned release candidate is **v1.0.0-rc.1**. It will be published only after the automated pre-RC acceptance gates are satisfied. Live Discord playback, provider behavior under real credentials and long-running load tests are planned for the RC validation cycle.
+
+See [RC1_ACCEPTANCE.md](RC1_ACCEPTANCE.md) for the release gates. Do not use the current development branch as a production replacement.
+
+## License
+
+RavaLink is distributed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+  <sub>Built in the open by the RavaLink community.</sub>
+</div>
