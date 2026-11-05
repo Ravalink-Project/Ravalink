@@ -35,8 +35,8 @@ unverified implementation rows.
       configured Invidious failover are tested with live providers.
 - [ ] Spotify, Apple Music and Deezer metadata, albums, playlists and playable
       track matching are tested with valid provider credentials where required.
-- [ ] Long tracks, initial offsets, repeated seeks, pause/resume, zero and
-      non-zero end-time, volume, every advertised filter and source replacement
+- [ ] Long tracks, initial offsets, repeated seeks, pause/resume, positive end-time and
+      rejection of zero/negative end-time, volume, every advertised filter and source replacement
       are tested.
 - [ ] Timescale speed, pitch and rate are independently exercised at supported
       limits and combined ratios, including stream end, seek and filter changes.
