@@ -262,6 +262,11 @@ impl PlayerStore {
                 match name.as_str() {
                     "guildId" | "state" | "endTime" => continue,
                     "track" => player["track"] = value.clone(),
+                    "userData" => {
+                        if player["track"].is_object() {
+                            player["track"]["userData"] = value.clone();
+                        }
+                    }
                     "position" => player["state"]["position"] = value.clone(),
                     "filters" if value.is_object() => player["filters"] = value.clone(),
                     _ => player[name] = value.clone(),
