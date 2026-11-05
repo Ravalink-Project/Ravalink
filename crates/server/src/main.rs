@@ -211,7 +211,7 @@ fn invalid_player_field(
             value.as_u64().is_some()
         }),
         ("endTime", |value: &serde_json::Value| {
-            value.is_null() || value.as_u64().is_some_and(|end_time| end_time > 0)
+            value.is_null() || value.as_u64().is_some()
         }),
         ("volume", |value: &serde_json::Value| {
             value.as_u64().is_some_and(|volume| volume <= 1_000)
@@ -2355,7 +2355,7 @@ mod server_api_tests {
             ("track", serde_json::json!("not-an-object")),
             ("paused", serde_json::json!("true")),
             ("position", serde_json::json!(-1)),
-            ("endTime", serde_json::json!(0)),
+            ("endTime", serde_json::json!(-1)),
             ("volume", serde_json::json!(1001)),
             ("filters", serde_json::json!([])),
             ("voice", serde_json::json!([])),
