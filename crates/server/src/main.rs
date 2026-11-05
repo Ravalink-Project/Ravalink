@@ -176,6 +176,14 @@ struct PlayerUpdateQuery {
     no_replace: bool,
 }
 
+fn user_id_header(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get("user-id")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|user_id| *user_id != 0)
+}
+
 fn client_name_header(headers: &HeaderMap) -> Option<String> {
     headers
         .get("client-name")
@@ -1716,16 +1724,8 @@ async fn websocket(
         return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
     }
 
-    let user_id = match headers
-        .get("user-id")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|user_id| *user_id != 0)
-    {
-        Some(value) => value,
-        None => {
-            return (StatusCode::BAD_REQUEST, "Missing or invalid User-Id header").into_response();
-        }
+    let Some(user_id) = user_id_header(&headers) else {
+        return (StatusCode::BAD_REQUEST, "Missing or invalid User-Id header").into_response();
     };
     // Client-Name is recommended by Lavalink v4 but remains optional.
     let client_name = client_name_header(&headers);
@@ -1734,11 +1734,7 @@ async fn websocket(
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
     let session_resumed = if let Some(session_id) = requested_session.as_deref() {
-        state
-            .sessions
-            .get(session_id)
-            .await
-            .is_some_and(|session| session.user_id == user_id && session.can_resume(Instant::now()))
+        state.sessions.can_resume(session_id, user_id).await
     } else {
         false
     };
@@ -1968,6 +1964,24 @@ mod server_api_tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("test-password"));
         headers
+    }
+
+    #[test]
+    fn websocket_user_id_must_be_a_non_zero_unsigned_integer() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(user_id_header(&headers), None);
+
+        headers.insert("user-id", HeaderValue::from_static("0"));
+        assert_eq!(user_id_header(&headers), None);
+
+        headers.insert("user-id", HeaderValue::from_static("-1"));
+        assert_eq!(user_id_header(&headers), None);
+
+        headers.insert("user-id", HeaderValue::from_static("not-a-snowflake"));
+        assert_eq!(user_id_header(&headers), None);
+
+        headers.insert("user-id", HeaderValue::from_static("123456789012345678"));
+        assert_eq!(user_id_header(&headers), Some(123456789012345678));
     }
 
     #[test]
