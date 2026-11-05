@@ -2673,6 +2673,30 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn update_player_rejects_negative_end_time_before_mutating_state() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "123456".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({"endTime": -1})),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.players.get(&session.id, "123456").await.is_none());
+        assert!(
+            state
+                .audio_players
+                .snapshot(&session.id, "123456")
+                .await
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn update_player_rejects_malformed_voice_state_before_mutating_state() {
         let state = state();
         let session = state.sessions.create(123, None).await;
