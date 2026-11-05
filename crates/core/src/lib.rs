@@ -380,6 +380,26 @@ mod player_store_tests {
     }
 
     #[tokio::test]
+    async fn user_data_update_changes_metadata_without_replacing_track() {
+        let store = PlayerStore::default();
+        store
+            .update(
+                "s",
+                "g",
+                json!({"track": {"encoded": "abc", "userData": {"old": true}}}),
+            )
+            .await;
+
+        store
+            .update("s", "g", json!({"userData": {"new": true}}))
+            .await;
+
+        let player = store.get("s", "g").await.unwrap();
+        assert_eq!(player["track"]["encoded"], "abc");
+        assert_eq!(player["track"]["userData"], json!({"new": true}));
+    }
+
+    #[tokio::test]
     async fn explicit_null_track_clears_track() {
         let store = PlayerStore::default();
         store
