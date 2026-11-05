@@ -985,6 +985,7 @@ async fn update_player(
             .expect("validated JSON object");
         object.remove("identifier");
         object.remove("encodedTrack");
+        object.insert("position".to_owned(), serde_json::json!(initial_position_ms));
         object.insert(
             "track".to_owned(),
             serde_json::to_value(track).expect("Track serializes to JSON"),
@@ -1008,6 +1009,7 @@ async fn update_player(
             .as_object_mut()
             .expect("validated JSON object");
         object.remove("position");
+        object.insert("paused".to_owned(), serde_json::json!(false));
         if encoded_track_is_null {
             object.remove("encodedTrack");
             object.insert("track".to_owned(), serde_json::Value::Null);
