@@ -36,14 +36,10 @@ jobs:
       #      - run: mkdocs build --verbose --strict
       - run: mkdocs build --verbose
         working-directory: docs
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'site'
-      - uses: cloudflare/pages-action@v1
+      - name: Deploy documentation to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
-          directory: site
+          command: pages deploy site --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          wranglerVersion: '3'
