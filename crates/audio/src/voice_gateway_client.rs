@@ -275,8 +275,10 @@ async fn run_voice_gateway_socket(
     mut speaking_rx: mpsc::UnboundedReceiver<bool>,
     endpoint: String,
 ) {
-    let mut heartbeat_timeout = heartbeat.period().saturating_mul(2);
-    let mut last_heartbeat_ack = tokio::time::Instant::now();
+    let mut heartbeat_watchdog = HeartbeatWatchdog::new(
+        tokio::time::Instant::now(),
+        heartbeat.period().saturating_mul(2),
+    );
     loop {
         let mut connection_lost = false;
         let mut close_info = VoiceWebSocketCloseInfo {
@@ -326,7 +328,7 @@ async fn run_voice_gateway_socket(
                     }
                     continue;
                 }
-                _ = tokio::time::sleep_until(last_heartbeat_ack + heartbeat_timeout) => {
+                _ = tokio::time::sleep_until(heartbeat_watchdog.deadline()) => {
                     tracing::warn!("Discord voice heartbeat acknowledgement timed out");
                     connection_lost = true;
                     break 'read;
@@ -438,7 +440,7 @@ async fn run_voice_gateway_socket(
                         Ok(())
                     }
                     VoiceGatewayAction::HeartbeatAck => {
-                        last_heartbeat_ack = tokio::time::Instant::now();
+                        heartbeat_watchdog.acknowledge(tokio::time::Instant::now());
                         Ok(())
                     }
                     VoiceGatewayAction::StartHeartbeat { .. }
@@ -476,9 +478,11 @@ async fn run_voice_gateway_socket(
             match resume_voice_gateway(&endpoint, &mut machine, &dave, &mut shutdown).await {
                 Ok((resumed_socket, resumed_heartbeat)) => {
                     socket = resumed_socket;
-                    heartbeat_timeout = resumed_heartbeat.period().saturating_mul(2);
+                    heartbeat_watchdog = HeartbeatWatchdog::new(
+                        tokio::time::Instant::now(),
+                        resumed_heartbeat.period().saturating_mul(2),
+                    );
                     heartbeat = resumed_heartbeat;
-                    last_heartbeat_ack = tokio::time::Instant::now();
                     tracing::info!("Discord voice websocket session resumed");
                     gateway_open.store(true, Ordering::Release);
                     resumed = true;
@@ -511,6 +515,26 @@ async fn run_voice_gateway_socket(
     }
     gateway_open.store(false, Ordering::Release);
     connected.store(false, Ordering::Release);
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HeartbeatWatchdog {
+    last_ack: tokio::time::Instant,
+    timeout: Duration,
+}
+
+impl HeartbeatWatchdog {
+    fn new(last_ack: tokio::time::Instant, timeout: Duration) -> Self {
+        Self { last_ack, timeout }
+    }
+
+    fn acknowledge(&mut self, at: tokio::time::Instant) {
+        self.last_ack = at;
+    }
+
+    fn deadline(&self) -> tokio::time::Instant {
+        self.last_ack + self.timeout
+    }
 }
 
 fn next_resume_backoff(current: Duration) -> Duration {
@@ -704,7 +728,7 @@ fn unix_time_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_dave_binary_frame, next_resume_backoff};
+    use super::{HeartbeatWatchdog, encode_dave_binary_frame, next_resume_backoff};
     use std::time::Duration;
 
     #[test]
@@ -713,6 +737,18 @@ mod tests {
             encode_dave_binary_frame(26, &[0xaa, 0xbb]),
             vec![26, 0xaa, 0xbb]
         );
+    }
+
+    #[test]
+    fn heartbeat_watchdog_deadline_resets_after_acknowledgement() {
+        let started = tokio::time::Instant::now();
+        let mut watchdog = HeartbeatWatchdog::new(started, Duration::from_secs(10));
+
+        assert_eq!(watchdog.deadline(), started + Duration::from_secs(10));
+
+        watchdog.acknowledge(started + Duration::from_secs(4));
+
+        assert_eq!(watchdog.deadline(), started + Duration::from_secs(14));
     }
 
     #[test]
