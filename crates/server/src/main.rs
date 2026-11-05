@@ -1229,6 +1229,9 @@ async fn run_voice_task(
             &mut shutdown,
         )
         .await;
+        while let Some(close_event) = connection.try_next_close_event() {
+            publish_websocket_closed(&state, &session_id, &guild_id, close_event);
+        }
         drop(connection);
         state
             .players
