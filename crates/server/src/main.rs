@@ -680,12 +680,12 @@ async fn get_player(
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
+    let path = format!("/v4/sessions/{session_id}/players/{guild_id}");
+    if guild_id.parse::<i64>().is_err() {
+        return api_error(StatusCode::BAD_REQUEST, "Invalid guildId", &path);
+    }
     if state.sessions.get(&session_id).await.is_none() {
-        return api_error(
-            StatusCode::NOT_FOUND,
-            "Session not found",
-            &format!("/v4/sessions/{session_id}/players/{guild_id}"),
-        );
+        return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
     }
     match state.players.get(&session_id, &guild_id).await {
         Some(player) => Json(player).into_response(),
@@ -705,12 +705,12 @@ async fn delete_player(
     if let Some(response) = authorization_failure(&headers, &state) {
         return response;
     }
+    let path = format!("/v4/sessions/{session_id}/players/{_guild_id}");
+    if _guild_id.parse::<i64>().is_err() {
+        return api_error(StatusCode::BAD_REQUEST, "Invalid guildId", &path);
+    }
     if state.sessions.get(&session_id).await.is_none() {
-        return api_error(
-            StatusCode::NOT_FOUND,
-            "Session not found",
-            &format!("/v4/sessions/{session_id}"),
-        );
+        return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
     }
     if let Some(encoded) = state
         .players
@@ -747,6 +747,9 @@ async fn update_player(
         return response;
     }
     let path = format!("/v4/sessions/{session_id}/players/{guild_id}");
+    if guild_id.parse::<i64>().is_err() {
+        return api_error(StatusCode::BAD_REQUEST, "Invalid guildId", &path);
+    }
     if state.sessions.get(&session_id).await.is_none() {
         return api_error(StatusCode::NOT_FOUND, "Session not found", &path);
     }
@@ -847,14 +850,14 @@ async fn update_player(
                     &path,
                 );
             };
-            if token.is_empty()
-                || endpoint.is_empty()
-                || session_id.is_empty()
-                || channel_id.is_empty()
+            if token.trim().is_empty()
+                || endpoint.trim().is_empty()
+                || session_id.trim().is_empty()
+                || channel_id.trim().parse::<i64>().is_err()
             {
                 return api_error(
                     StatusCode::BAD_REQUEST,
-                    "Voice state fields cannot be empty",
+                    "Voice state requires non-empty token, endpoint, sessionId and a numeric channelId",
                     &path,
                 );
             }
