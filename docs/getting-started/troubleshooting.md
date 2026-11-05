@@ -1,60 +1,50 @@
 ---
-description: Lavalink troubleshooting steps.
+description: Troubleshoot common RavaLink deployment and connection issues.
 ---
 
 # Troubleshooting
 
-## Lavalink won't start
+## RavaLink does not start
 
-If Lavalink won't start, check the following:
+- Confirm that RAVALINK_PASSWORD is set and contains at least 16 characters.
+- Check that the TOML file is valid and that RAVALINK_CONFIG points to an existing file if explicitly set.
+- Confirm that the configured address and port are available.
+- Run with RAVALINK_LOG_LEVEL=debug to obtain more diagnostic output.
+- Check the service logs with journalctl when running under systemd.
 
-- Make sure you have Java 17 or higher installed. You can download it [here](https://www.azul.com/downloads/?package=jdk#zulu).
+## The client cannot connect
 
-- Make sure you have downloaded the latest `Lavalink.jar` from [GitHub](https://github.com/lavalink-devs/Lavalink/releases/latest).
+- Confirm that the node address and port are reachable from the bot host.
+- Verify that the client uses the same password configured on the node.
+- If using a reverse proxy, make sure it forwards WebSocket upgrade requests.
+- Check that TLS settings in the client match the proxy endpoint.
 
-- Make sure you have configured Lavalink correctly. Check out the [configuration](../configuration/index.md) page for more information.
+## The player does not join a voice channel
 
-- If you're using Docker, make sure you have configured Docker correctly.
-  Check out the [Docker](../configuration/docker.md) page for more information.
+The Discord bot client must forward the Discord voice server and voice state updates to the Lavalink node using the player update REST endpoint. Check that the payload contains the current token, endpoint, sessionId and channelId values.
 
-- If you're using Systemd, make sure you have configured Systemd correctly.
-  Check out the [Systemd](../configuration/systemd.md) page for more information.
+## Audio does not play
 
-- If you are using a firewall, make sure you have opened the port you configured Lavalink to use.
+- Confirm that the selected provider can resolve the identifier.
+- Check provider credentials and upstream availability where required.
+- Inspect TrackException events and server logs.
+- Check the [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) for unsupported source/container cases.
 
-- If you are using a reverse proxy, make sure you have configured it correctly. Nginx needs to be configured to pass the `Upgrade` header for WebSockets to work.
+## Enable debug logging
 
-## Configuring more detailed Logging
+Set the log level in the TOML file:
 
-If you are having issues with Lavalink, you can enable more detailed logging by adding the following to your `application.yml`:
+~~~toml
+[logging]
+level = "debug"
+~~~
 
-In general there are 6 log levels: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR` and `OFF`.
+Or use the environment variable:
 
-```yaml title="application.yml"
-logging:
-  level:
-    root: INFO
-    # Set this to DEBUG to enable more detailed logging from Lavalink
-    lavalink: DEBUG
-    # Set this to TRACE to see all WebSocket messages sent
-    lavalink.server.io.SocketContext: TRACE
-    # Log all track exceptions (COMMON, SUSPICIOUS & FAULT)
-    com.sedmelluq.discord.lavaplayer.tools.ExceptionTools: DEBUG
-    # Log YouTube Plugin stuff (only needed if you have issues with YouTube)
-    dev.lavalink.youtube: DEBUG
-    # Log Koe internals (only needed if you have issues with Koe/DAVE)
-    moe.kyokobot.koe.internal.dave: TRACE
-    moe.kyokobot.koe.internal.gateway: TRACE
+~~~bash
+RAVALINK_LOG_LEVEL=debug
+~~~
 
-  # This will log all requests to the REST API
-  request:
-    enabled: true
-    includeClientInfo: true
-    includeHeaders: false
-    includeQueryString: true
-    includePayload: true
-```
+## Get help
 
-## Lavalink won't connect to Discord / Play Audio
-
-If Lavalink doesn't connect to Discord, make sure you forward the `sessionId`, `token` and `endpoint` to Lavalink via the [player update endpoint](../api/rest.md#update-player).
+Join the [RavaLink Discord community](https://discord.gg/PBxB5eFNUp). When sharing logs, remove passwords, tokens, provider credentials and other secrets first.
