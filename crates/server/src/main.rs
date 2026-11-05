@@ -196,7 +196,7 @@ type PlayerFieldValidator = (&'static str, fn(&serde_json::Value) -> bool);
 fn invalid_player_field(
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<&'static str> {
-    let field_validators: [PlayerFieldValidator; 7] = [
+    let field_validators: [PlayerFieldValidator; 9] = [
         ("identifier", |value: &serde_json::Value| {
             value.is_null() || value.is_string()
         }),
@@ -210,17 +210,45 @@ fn invalid_player_field(
         ("position", |value: &serde_json::Value| {
             value.as_u64().is_some()
         }),
+        ("endTime", |value: &serde_json::Value| {
+            value.is_null() || value.as_u64().is_some_and(|end_time| end_time > 0)
+        }),
         ("volume", |value: &serde_json::Value| {
             value.as_u64().is_some_and(|volume| volume <= 1_000)
         }),
         ("filters", |value: &serde_json::Value| value.is_object()),
+        ("voice", |value: &serde_json::Value| value.is_null() || value.is_object()),
     ];
-    field_validators.into_iter().find_map(|(field, valid)| {
+    if let Some(invalid) = field_validators.into_iter().find_map(|(field, valid)| {
         fields
             .get(field)
             .filter(|value| !valid(value))
             .map(|_| field)
-    })
+    }) {
+        return Some(invalid);
+    }
+
+    if let Some(track) = fields.get("track").and_then(serde_json::Value::as_object) {
+        if track
+            .get("identifier")
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
+            return Some("track.identifier");
+        }
+        if track
+            .get("encoded")
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
+            return Some("track.encoded");
+        }
+        if track
+            .get("userData")
+            .is_some_and(|value| !value.is_object())
+        {
+            return Some("track.userData");
+        }
+    }
+    None
 }
 
 fn requested_track_identifier(fields: &serde_json::Map<String, serde_json::Value>) -> Option<&str> {
@@ -2193,8 +2221,10 @@ mod server_api_tests {
             "track": null,
             "paused": false,
             "position": 0,
+            "endTime": null,
             "volume": 1000,
-            "filters": {}
+            "filters": {},
+            "voice": null
         });
         assert_eq!(invalid_player_field(valid.as_object().unwrap()), None);
 
@@ -2204,8 +2234,10 @@ mod server_api_tests {
             ("track", serde_json::json!("not-an-object")),
             ("paused", serde_json::json!("true")),
             ("position", serde_json::json!(-1)),
+            ("endTime", serde_json::json!(0)),
             ("volume", serde_json::json!(1001)),
             ("filters", serde_json::json!([])),
+            ("voice", serde_json::json!([])),
         ] {
             let invalid =
                 serde_json::Value::Object([(field.to_owned(), value)].into_iter().collect());
@@ -2214,6 +2246,34 @@ mod server_api_tests {
                 Some(field)
             );
         }
+    }
+
+    #[test]
+    fn player_update_validation_checks_nested_v4_track_fields() {
+        for (field, value) in [
+            ("identifier", serde_json::json!(123)),
+            ("encoded", serde_json::json!(false)),
+            ("userData", serde_json::json!("not-an-object")),
+        ] {
+            let request = serde_json::json!({"track": {field: value}});
+            assert_eq!(
+                invalid_player_field(request.as_object().unwrap()),
+                Some(match field {
+                    "identifier" => "track.identifier",
+                    "encoded" => "track.encoded",
+                    "userData" => "track.userData",
+                    _ => unreachable!(),
+                })
+            );
+        }
+
+        let valid_nested = serde_json::json!({
+            "track": {
+                "encoded": "encoded-track",
+                "userData": {"requester": "123"}
+            }
+        });
+        assert_eq!(invalid_player_field(valid_nested.as_object().unwrap()), None);
     }
 
     #[tokio::test]
