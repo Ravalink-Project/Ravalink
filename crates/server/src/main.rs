@@ -3050,6 +3050,51 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn stats_endpoint_returns_lavalink_v4_stats_shape() {
+        let response = stats(authorized_headers(), State(state())).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let stats: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(stats["players"].is_number());
+        assert!(stats["playingPlayers"].is_number());
+        assert!(stats["uptime"].is_number());
+        assert!(stats["memory"].is_object());
+        assert!(stats["cpu"].is_object());
+        assert!(stats.get("frameStats").is_none());
+    }
+
+    #[tokio::test]
+    async fn load_tracks_returns_lavalink_empty_result_for_unhandled_identifier() {
+        let response = load_tracks(
+            authorized_headers(),
+            State(state()),
+            Query(LoadTracksQuery {
+                identifier: "ravalink-smoke-unsupported:track".into(),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["loadType"], "empty");
+        assert!(result["data"].is_null());
+    }
+
+    #[tokio::test]
+    async fn decode_tracks_rejects_an_empty_batch() {
+        let response = decode_tracks_endpoint(
+            authorized_headers(),
+            State(state()),
+            Json(EncodedTracks(Vec::new())),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn routeplanner_status_returns_no_content_when_disabled() {
         let response = routeplanner_status(authorized_headers(), State(state())).await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
