@@ -58,7 +58,7 @@ impl Default for LavaSearchPlugin {
         Self {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
-                .user_agent("RavaLink/0.1 (native LavaSearch)")
+                .user_agent(format!("RavaLink/{} (native LavaSearch)", env!("CARGO_PKG_VERSION")))
                 .build()
                 .expect("valid default HTTP client"),
             lavasrc: LavaSrcPlugin::default(),
