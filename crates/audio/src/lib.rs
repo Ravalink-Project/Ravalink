@@ -1672,9 +1672,14 @@ mod tests {
                 )
                 .unwrap();
 
-            let mut filters = Filters::default();
-            filters.timescale =
-                Omissible::Present(Some(ravalink_protocol::Timescale { speed, pitch, rate }));
+            let filters = Filters {
+                timescale: Omissible::Present(Some(ravalink_protocol::Timescale {
+                    speed,
+                    pitch,
+                    rate,
+                })),
+                ..Filters::default()
+            };
             player.set_filters(filters);
 
             let mut output_frames = 0;
