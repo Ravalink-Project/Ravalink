@@ -16,7 +16,7 @@ pub mod rtp;
 pub mod voice_crypto;
 pub mod voice_gateway;
 pub mod voice_gateway_client;
-pub use voice_gateway_client::DiscordVoiceConnection;
+pub use voice_gateway_client::{DiscordVoiceConnection, VoiceWebSocketCloseInfo};
 pub mod voice_pcm;
 pub mod voice_udp;
 pub use dave::{DaveGatewayCommand, DaveVoiceController, DaveVoiceError, DaveVoiceSession};
