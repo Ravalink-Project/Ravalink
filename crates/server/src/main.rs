@@ -2242,7 +2242,7 @@ mod server_api_tests {
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({
                 "identifier": "https://cdn.example/audio.mp3",
-                "filters": {"timescale": {"speed": 1.25}}
+                "filters": {"communityFilter": {"amount": 0.5}}
             })),
         )
         .await;
@@ -2261,13 +2261,56 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn update_player_accepts_timescale_and_zero_end_time() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({
+                "endTime": 0,
+                "filters": {
+                    "timescale": {"speed": 1.5, "pitch": 1.0, "rate": 1.0}
+                }
+            })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(player["filters"]["timescale"]["speed"], 1.5);
+        assert_eq!(player["guildId"], "guild");
+    }
+
+    #[tokio::test]
+    async fn update_player_rejects_timescale_ratios_outside_native_engine_range() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        let response = update_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "guild".into())),
+            Query(PlayerUpdateQuery::default()),
+            Json(serde_json::json!({
+                "identifier": "https://cdn.example/audio.mp3",
+                "filters": {"timescale": {"speed": 8.0, "pitch": 1.0, "rate": 1.0}}
+            })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.players.get(&session.id, "guild").await.is_none());
+        assert!(state.audio_players.snapshot(&session.id, "guild").await.is_none());
+    }
+
+    #[tokio::test]
     async fn update_player_rejects_filters_without_native_implementations() {
         let state = state();
         let session = state.sessions.create(123, None).await;
-        for filters in [
-            serde_json::json!({"timescale": {"speed": 1.2}}),
-            serde_json::json!({"communityFilter": {"amount": 0.5}}),
-        ] {
+        for filters in [serde_json::json!({"communityFilter": {"amount": 0.5}})] {
             let response = update_player(
                 authorized_headers(),
                 State(state.clone()),
