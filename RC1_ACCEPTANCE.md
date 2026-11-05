@@ -22,7 +22,7 @@ performed during the RC cycle.
       source payloads; unsupported plugin payloads fail explicitly.
 - [ ] Every advertised standard filter, including independent Timescale
       speed, pitch and rate controls, passes DSP and player-lifecycle tests.
-- [ ] Playback tests cover seek, replacement, end-time (including zero),
+- [ ] Playback tests cover seek, replacement, positive end-time and zero/negative end-time rejection,
       pause/resume, decoder failure, cancellation and bounded-resource limits.
 - [ ] Provider tests cover success, empty results, malformed responses,
       unavailable providers and playable-track matching.
