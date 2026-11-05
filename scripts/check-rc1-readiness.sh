@@ -18,7 +18,8 @@ workspace_version="$(
     }
   ' Cargo.toml
 )"
-tag_version="${GITHUB_REF_NAME#v}"
+tag_version="${GITHUB_REF_NAME:-}"
+tag_version="${tag_version#v}"
 base_tag_version="${tag_version%%-*}"
 if [[ -n "${GITHUB_REF_NAME:-}" && "$base_tag_version" != "$workspace_version" ]]; then
   echo "RC1 tag ${GITHUB_REF_NAME} does not match workspace version $workspace_version." >&2
