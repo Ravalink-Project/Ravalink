@@ -217,7 +217,9 @@ fn invalid_player_field(
             value.as_u64().is_some_and(|volume| volume <= 1_000)
         }),
         ("filters", |value: &serde_json::Value| value.is_object()),
-        ("voice", |value: &serde_json::Value| value.is_null() || value.is_object()),
+        ("voice", |value: &serde_json::Value| {
+            value.is_null() || value.is_object()
+        }),
     ];
     if let Some(invalid) = field_validators.into_iter().find_map(|(field, valid)| {
         fields
@@ -2273,7 +2275,10 @@ mod server_api_tests {
                 "userData": {"requester": "123"}
             }
         });
-        assert_eq!(invalid_player_field(valid_nested.as_object().unwrap()), None);
+        assert_eq!(
+            invalid_player_field(valid_nested.as_object().unwrap()),
+            None
+        );
     }
 
     #[tokio::test]
