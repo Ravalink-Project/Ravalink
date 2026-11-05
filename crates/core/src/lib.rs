@@ -270,19 +270,32 @@ impl PlayerStore {
         });
 
         if let Some(fields) = update.as_object() {
+            let track_updated = fields.contains_key("track");
             for (name, value) in fields {
                 match name.as_str() {
-                    "guildId" | "state" | "endTime" => continue,
+                    "guildId" | "state" | "endTime" | "position" => continue,
                     "track" => player["track"] = value.clone(),
                     "userData" => {
                         if player["track"].is_object() {
                             player["track"]["userData"] = value.clone();
                         }
                     }
-                    "position" => player["state"]["position"] = value.clone(),
                     "filters" if value.is_object() => player["filters"] = value.clone(),
                     _ => player[name] = value.clone(),
                 }
+            }
+
+            if track_updated {
+                let position = fields
+                    .get("position")
+                    .cloned()
+                    .or_else(|| player["track"]["info"]["position"].as_u64().map(json!))
+                    .unwrap_or_else(|| json!(0));
+                player["state"]["position"] = position;
+            } else if player["track"].is_object()
+                && let Some(position) = fields.get("position")
+            {
+                player["state"]["position"] = position.clone();
             }
         }
         player["state"]["time"] = json!(current_time_ms());
