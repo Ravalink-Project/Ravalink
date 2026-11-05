@@ -10,4 +10,5 @@ ravalink-plugin-api = { path = "../plugin-api" }
 ravalink-protocol = { path = "../../protocol" }
 reqwest.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 
