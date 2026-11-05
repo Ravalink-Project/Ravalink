@@ -2728,6 +2728,35 @@ mod server_api_tests {
     }
 
     #[tokio::test]
+    async fn get_player_returns_existing_lavalink_player_state() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        state
+            .players
+            .update(
+                &session.id,
+                "123456",
+                serde_json::json!({"volume": 85, "paused": true}),
+            )
+            .await;
+
+        let response = get_player(
+            authorized_headers(),
+            State(state),
+            Path((session.id, "123456".into())),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(player["guildId"], "123456");
+        assert_eq!(player["volume"], 85);
+        assert_eq!(player["paused"], true);
+        assert!(player["state"]["time"].as_u64().is_some());
+    }
+
+    #[tokio::test]
     async fn get_player_rejects_non_numeric_guild_id() {
         let response = get_player(
             authorized_headers(),
