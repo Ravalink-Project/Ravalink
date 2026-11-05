@@ -88,6 +88,7 @@ impl Default for ServerInfo {
                 "volume".into(),
                 "equalizer".into(),
                 "karaoke".into(),
+                "timescale".into(),
                 "tremolo".into(),
                 "vibrato".into(),
                 "distortion".into(),
