@@ -900,7 +900,11 @@ async fn update_player(
     };
     let fields = fields.clone();
     let mut normalized_update = update;
-    if !has_track_request && fields.get("track").is_some_and(serde_json::Value::is_object) {
+    if !has_track_request
+        && fields
+            .get("track")
+            .is_some_and(serde_json::Value::is_object)
+    {
         normalized_update
             .as_object_mut()
             .expect("validated JSON object")
