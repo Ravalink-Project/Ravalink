@@ -772,17 +772,10 @@ async fn update_player(
     let nested_track = fields.get("track").filter(|track| track.is_object());
     let nested_identifier = nested_track.and_then(|track| track.get("identifier"));
     let nested_encoded_track = nested_track.and_then(|track| track.get("encoded"));
-    let has_identifier = fields
-        .get("identifier")
-        .is_some_and(|value| !value.is_null())
-        || nested_identifier.is_some_and(|value| !value.is_null());
-    let has_encoded_track = fields
-        .get("encodedTrack")
-        .is_some_and(|value| !value.is_null())
-        || nested_encoded_track.is_some_and(|value| !value.is_null());
-    let has_track_object =
-        nested_track.is_some() && !nested_encoded_track.is_some_and(serde_json::Value::is_null);
-    let has_track_request = has_identifier || has_encoded_track || has_track_object;
+    let has_identifier = fields.contains_key("identifier") || nested_identifier.is_some();
+    let has_encoded_track = fields.contains_key("encodedTrack") || nested_encoded_track.is_some();
+    let has_track_request =
+        has_identifier || has_encoded_track || fields.get("track").is_some_and(serde_json::Value::is_null);
     let encoded_track_is_null = fields
         .get("encodedTrack")
         .is_some_and(serde_json::Value::is_null)
@@ -912,6 +905,17 @@ async fn update_player(
 
     let fields = fields.clone();
     let mut normalized_update = update;
+    if !has_track_request
+        && let Some(track) = fields.get("track").and_then(serde_json::Value::as_object)
+    {
+        let object = normalized_update
+            .as_object_mut()
+            .expect("validated JSON object");
+        object.remove("track");
+        if let Some(user_data) = track.get("userData") {
+            object.insert("userData".to_owned(), user_data.clone());
+        }
+    }
     if no_replace_active {
         let object = normalized_update
             .as_object_mut()
