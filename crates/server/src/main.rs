@@ -2054,7 +2054,7 @@ mod server_api_tests {
         let response = update_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({"track": {"encoded": null}})),
         )
@@ -2073,7 +2073,7 @@ mod server_api_tests {
         let response = update_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({
                 "identifier": "https://example.invalid/audio.mp3",
@@ -2084,13 +2084,13 @@ mod server_api_tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(
-            state.players.get(&session.id, "guild").await.is_none(),
+            state.players.get(&session.id, "123456").await.is_none(),
             "invalid volume must be rejected before a track/player is created"
         );
         assert!(
             state
                 .audio_players
-                .snapshot(&session.id, "guild")
+                .snapshot(&session.id, "123456")
                 .await
                 .is_none(),
             "invalid volume must not create native playback state"
@@ -2343,7 +2343,7 @@ mod server_api_tests {
             .players
             .update(
                 &session.id,
-                "guild",
+                "123456",
                 serde_json::json!({"volume": 75, "paused": false}),
             )
             .await;
@@ -2358,22 +2358,22 @@ mod server_api_tests {
         let body = to_bytes(listed.into_body(), 16 * 1024).await.unwrap();
         let players: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(players.as_array().unwrap().len(), 1);
-        assert_eq!(players[0]["guildId"], "guild");
+        assert_eq!(players[0]["guildId"], "123456");
         assert_eq!(players[0]["volume"], 75);
 
         let deleted = delete_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
         )
         .await;
         assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
-        assert!(state.players.get(&session.id, "guild").await.is_none());
+        assert!(state.players.get(&session.id, "123456").await.is_none());
 
         let missing = get_player(
             authorized_headers(),
             State(state),
-            Path((session.id, "guild".into())),
+            Path((session.id, "123456".into())),
         )
         .await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
@@ -2387,9 +2387,9 @@ mod server_api_tests {
             .players
             .update(
                 &session.id,
-                "guild",
+                "123456",
                 serde_json::json!({
-                    "guildId": "guild",
+                    "guildId": "123456",
                     "track": null,
                     "volume": 100,
                     "paused": false
@@ -2400,7 +2400,7 @@ mod server_api_tests {
         let response = update_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({
                 "identifier": "https://cdn.example/audio.mp3",
@@ -2410,13 +2410,13 @@ mod server_api_tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let player = state.players.get(&session.id, "guild").await.unwrap();
+        let player = state.players.get(&session.id, "123456").await.unwrap();
         assert!(player["track"].is_null());
         assert_eq!(player["volume"], 100);
         assert!(
             state
                 .audio_players
-                .snapshot(&session.id, "guild")
+                .snapshot(&session.id, "123456")
                 .await
                 .is_none_or(|snapshot| snapshot.track.is_none())
         );
@@ -2540,7 +2540,7 @@ mod server_api_tests {
         let response = update_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({
                 "endTime": 1_000,
@@ -2555,7 +2555,7 @@ mod server_api_tests {
         let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
         let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(player["filters"]["timescale"]["speed"], 1.5);
-        assert_eq!(player["guildId"], "guild");
+        assert_eq!(player["guildId"], "123456");
     }
 
     #[tokio::test]
@@ -2565,18 +2565,18 @@ mod server_api_tests {
         let response = update_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({"endTime": 0})),
         )
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(state.players.get(&session.id, "guild").await.is_none());
+        assert!(state.players.get(&session.id, "123456").await.is_none());
         assert!(
             state
                 .audio_players
-                .snapshot(&session.id, "guild")
+                .snapshot(&session.id, "123456")
                 .await
                 .is_none()
         );
@@ -2631,7 +2631,7 @@ mod server_api_tests {
         let response = update_player(
             authorized_headers(),
             State(state.clone()),
-            Path((session.id.clone(), "guild".into())),
+            Path((session.id.clone(), "123456".into())),
             Query(PlayerUpdateQuery::default()),
             Json(serde_json::json!({
                 "identifier": "https://cdn.example/audio.mp3",
@@ -2641,11 +2641,11 @@ mod server_api_tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(state.players.get(&session.id, "guild").await.is_none());
+        assert!(state.players.get(&session.id, "123456").await.is_none());
         assert!(
             state
                 .audio_players
-                .snapshot(&session.id, "guild")
+                .snapshot(&session.id, "123456")
                 .await
                 .is_none()
         );
@@ -2659,7 +2659,7 @@ mod server_api_tests {
             let response = update_player(
                 authorized_headers(),
                 State(state.clone()),
-                Path((session.id.clone(), "guild".into())),
+                Path((session.id.clone(), "123456".into())),
                 Query(PlayerUpdateQuery::default()),
                 Json(serde_json::json!({"filters": filters})),
             )
@@ -2673,7 +2673,7 @@ mod server_api_tests {
         let response = get_player(
             authorized_headers(),
             State(state()),
-            Path(("missing-session".into(), "guild".into())),
+            Path(("missing-session".into(), "123456".into())),
         )
         .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -2795,16 +2795,16 @@ mod server_api_tests {
             .voice_tasks
             .lock()
             .await
-            .insert(("session".into(), "guild".into()), shutdown);
+            .insert(("session".into(), "123456".into()), shutdown);
         state
             .players
-            .update("session", "guild", serde_json::json!({}))
+            .update("session", "123456", serde_json::json!({}))
             .await;
         assert!(
             state
                 .playback_sources
                 .replace(
-                    ("session".into(), "guild".into()),
+                    ("session".into(), "123456".into()),
                     CachedHttpSource {
                         bytes: Arc::from(vec![1, 2, 3]),
                         extension: Some("wav".into()),
@@ -2819,7 +2819,7 @@ mod server_api_tests {
             .audio_players
             .set_voice_state(
                 "session",
-                "guild",
+                "123456",
                 Some(DiscordVoiceState {
                     token: "token".into(),
                     endpoint: "voice.example".into(),
@@ -2846,7 +2846,7 @@ mod server_api_tests {
         assert!(
             state
                 .audio_players
-                .voice_state("session", "guild")
+                .voice_state("session", "123456")
                 .await
                 .is_none()
         );
@@ -2876,19 +2876,19 @@ mod server_api_tests {
             user_data: serde_json::json!({}),
         };
         let encoded = encode_track(&track).unwrap();
-        publish_track_start(&state, "session", "guild", encoded.clone());
+        publish_track_start(&state, "session", "123456", encoded.clone());
         let (_, started) = receiver.try_recv().unwrap();
         let started = serde_json::to_value(started).unwrap();
         assert_eq!(started["op"], "event");
         assert_eq!(started["type"], "TrackStartEvent");
-        assert_eq!(started["guildId"], "guild");
+        assert_eq!(started["guildId"], "123456");
         assert_eq!(started["track"]["encoded"], encoded);
         assert_eq!(started["track"]["info"]["title"], "test track");
 
         publish_track_end(
             &state,
             "session",
-            "guild",
+            "123456",
             encoded.clone(),
             TrackEndReason::Finished,
         );
@@ -2898,7 +2898,7 @@ mod server_api_tests {
         assert_eq!(ended["track"]["encoded"], encoded);
         assert_eq!(ended["reason"], "finished");
 
-        publish_track_stuck(&state, "session", "guild", encoded.clone(), 10_000);
+        publish_track_stuck(&state, "session", "123456", encoded.clone(), 10_000);
         let (_, stuck) = receiver.try_recv().unwrap();
         let stuck = serde_json::to_value(stuck).unwrap();
         assert_eq!(stuck["type"], "TrackStuckEvent");
