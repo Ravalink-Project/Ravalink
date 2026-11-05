@@ -774,8 +774,9 @@ async fn update_player(
     let nested_encoded_track = nested_track.and_then(|track| track.get("encoded"));
     let has_identifier = fields.contains_key("identifier") || nested_identifier.is_some();
     let has_encoded_track = fields.contains_key("encodedTrack") || nested_encoded_track.is_some();
-    let has_track_request =
-        has_identifier || has_encoded_track || fields.get("track").is_some_and(serde_json::Value::is_null);
+    let has_track_request = has_identifier
+        || has_encoded_track
+        || fields.get("track").is_some_and(serde_json::Value::is_null);
     let encoded_track_is_null = fields
         .get("encodedTrack")
         .is_some_and(serde_json::Value::is_null)
@@ -2414,7 +2415,10 @@ mod server_api_tests {
         let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
         let player: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(player["track"]["encoded"], "existing-track");
-        assert_eq!(player["track"]["userData"], serde_json::json!({"new": true}));
+        assert_eq!(
+            player["track"]["userData"],
+            serde_json::json!({"new": true})
+        );
     }
 
     #[tokio::test]
@@ -2488,7 +2492,13 @@ mod server_api_tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(state.players.get(&session.id, "123456").await.is_none());
-        assert!(state.audio_players.snapshot(&session.id, "123456").await.is_none());
+        assert!(
+            state
+                .audio_players
+                .snapshot(&session.id, "123456")
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
