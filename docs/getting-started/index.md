@@ -1,47 +1,26 @@
 ---
-description: Lavalink getting started guide.
+description: Getting started with the native RavaLink audio node.
 ---
 
-# Getting Started
+# Getting started
 
-Welcome to the Lavalink Getting Started guide. If you're new to Lavalink, follow these steps to get started:
+RavaLink is a native Rust audio node that targets the Lavalink v4 protocol. You can build it from source or run it with Docker.
 
-## Prerequisites
+> [!WARNING]
+> RavaLink is in pre-release development. Review the [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) before using it outside a test environment.
 
-Before you start, make sure you have picked an up-to-date Lavalink client. You can find a list of clients on the [clients](../clients.md) page.
+## Before you begin
 
-## Running Lavalink
+- Choose a Lavalink v4-compatible Discord client. See [client validation](../clients.md).
+- Prepare a secure node password of at least 16 characters.
+- Decide whether you want a source build, a systemd service or Docker.
 
-Generally there are a few different ways to run Lavalink:
+## Run RavaLink
 
-### Standalone Binary
+- [Build and run the native binary](binary.md)
+- [Run under systemd](systemd.md)
+- [Run with Docker](docker.md)
 
-!!! note
+## Need help?
 
-    This is the easiest way to run Lavalink.
-
-To run Lavalink as a standalone binary, follow the steps [here](binary.md).
-
-### Systemd
-
-!!! note
-
-    This is the recommended way to run Lavalink on Linux.
-
-Running Lavalink as a systemd service makes sure that Lavalink is always running and restarts it if it crashes.
-You can find the instructions [here](systemd.md).
-
-### Docker
-
-!!! note
-
-    This is the recommended way for experienced users to run Lavalink.
-
-Running applications in Docker containers is a great way to isolate them from the host system and make them portable.
-You can find the instructions [here](docker.md).
-
-## Getting stuck?
-
-Check out the [Troubleshooting section](../troubleshooting.md) and the [FAQ](faq.md) for common issues and questions.
-
-If you are still stuck, you can join the [Lavalink support Discord]({{ discord_help }}) or open a [GitHub discussion](https://github.com/lavalink-devs/Lavalink/discussions/new?category=q-a) for help or questions.
+Join the [RavaLink Discord community](https://discord.gg/PBxB5eFNUp). When reporting a problem, include the RavaLink commit, operating system, client version and sanitized logs.
