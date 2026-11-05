@@ -252,7 +252,12 @@ impl PlayerStore {
                     "connected": false,
                     "ping": -1
                 },
-                "voice": null,
+                "voice": {
+                    "token": "",
+                    "endpoint": "",
+                    "sessionId": "",
+                    "channelId": null
+                },
                 "filters": {}
             })
         });
