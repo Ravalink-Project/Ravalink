@@ -1,46 +1,33 @@
 ---
-description: Lavalink frequently asked questions.
+description: Frequently asked questions about RavaLink.
 ---
 
 # FAQ
 
-## What is Lavalink?
+## What is RavaLink?
 
-Lavalink is a standalone audio player node that is used to stream music to Discord voice servers. It is written in Java and is based on [lavaplayer](https://github.com/lavalink-devs/lavaplayer) and [koe](https://github.com/KyokoBot/koe).
+RavaLink is an independent native Rust audio node designed to implement the Lavalink v4 server protocol for Discord music bots. Unlike the original Lavalink Java server, the RavaLink runtime does not require a JVM or Lavaplayer.
 
-## What is Lavalink used for?
+## Is RavaLink a drop-in Lavalink replacement?
 
-Lavalink is used to stream music to Discord voice servers. It is used by many Discord music bots, including [FredBoat](https://fredboat.com) and many others.
+That is the project goal, but full compatibility has not yet been declared. Automated smoke tests cover Wavelink and Shoukaku integration paths. See the [compatibility ledger](https://github.com/Ravalink-Project/Ravalink/blob/master/COMPATIBILITY.md) for current implementation status and limitations.
 
-## How do I install Lavalink?
+## How do I install RavaLink?
 
-See the [Getting Started](index.md) for instructions on how to install Lavalink.
+Follow the [source build guide](binary.md) or the [Docker guide](docker.md). Prebuilt release assets will be published with the first release candidate after its acceptance gates pass.
 
-## How do I configure Lavalink?
+## How do I configure RavaLink?
 
-See the [Configuration](../configuration/index.md) page for instructions on how to configure Lavalink.
+RavaLink uses a TOML file and RAVALINK_* environment variables. Start with the [configuration guide](../configuration/).
 
-## How do I connect to Lavalink?
+## Can I use my existing Lavalink client?
 
-See the [Clients](../clients.md) page for a list of clients that can connect to Lavalink. Each client has its own instructions on how to connect to Lavalink.
+RavaLink is designed to support clients that speak Lavalink v4. Wavelink 3.5.2 and Shoukaku 4.3.0 have automated CI smoke tests; other clients and full feature parity are not yet certified. See [client compatibility](../clients.md).
 
-## How do I run Lavalink in the background?
+## Can I load Java Lavalink plugins?
 
-See the [Docker](../configuration/docker.md) or [Systemd](../configuration/systemd.md) configuration pages for instructions on how to run Lavalink in the background.
+No. RavaLink is not a JVM plugin host. It provides built-in Rust provider integrations and an external-process extension protocol. See [Plugins and extensions](../plugins.md).
 
-## How do I update Lavalink?
+## How do I report a problem?
 
-Updating Lavalink is as simple as downloading the latest `Lavalink.jar` from [GitHub](https://github.com/lavalink-devs/Lavalink/releases/latest) and replacing the old jar file with the new one.
-When using Docker, you can simply pull the latest image from [GitHub Container Registry](https://github.com/lavalink-devs/Lavalink/pkgs/container/lavalink).
-
-## How do I report a bug?
-
-Open an issue on the [issue tracker](https://github.com/lavalink-devs/Lavalink/issues/new?labels=bug&template=bug_report.md).
-
-## How do I get help?
-
-Join the [Lavalink support Discord]({{ discord_help }}) or open a [GitHub discussion](https://github.com/lavalink-devs/Lavalink/discussions/new?category=q-a).
-
-## How do I get support for a client?
-
-Open an issue on the client's GitHub repository or join the client's support Discord. The [Lavalink support Discord]({{ discord }}) also has a channel for each client where you can get support.
+Join the [RavaLink Discord](https://discord.gg/PBxB5eFNUp) and include the commit or release tag, client version, operating system, reproduction steps and sanitized logs.
