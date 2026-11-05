@@ -1870,7 +1870,7 @@ async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
     user_id: u64,
-    client_name: Option<String>,
+    client_name: String,
     requested_session: Option<String>,
 ) {
     let resumed_session = match requested_session {
@@ -1880,7 +1880,7 @@ async fn handle_socket(
     let (session_id, resumed) = if let Some(session) = resumed_session {
         (session.id, true)
     } else {
-        let session = state.sessions.create(user_id, client_name).await;
+        let session = state.sessions.create(user_id, Some(client_name)).await;
         (session.id, false)
     };
 
