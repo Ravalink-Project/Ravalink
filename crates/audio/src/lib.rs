@@ -1155,6 +1155,9 @@ impl NativePlayer {
 impl AudioPipeline for NativePlayer {
     fn start(&mut self, track: AudioTrack) -> Result<(), AudioError> {
         self.processor.reset_state();
+        if let Some(stretcher) = self.timescale.as_mut() {
+            stretcher.reset();
+        }
         self.track = Some(track);
         self.completed_track = None;
         self.paused = false;
@@ -1239,6 +1242,9 @@ impl AudioPipeline for NativePlayer {
             encoder.reset()?;
         }
         self.processor.reset_state();
+        if let Some(stretcher) = self.timescale.as_mut() {
+            stretcher.reset();
+        }
         Ok(())
     }
 }
