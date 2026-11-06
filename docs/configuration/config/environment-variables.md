@@ -22,7 +22,9 @@ RavaLink environment variables use the RAVALINK_ prefix. They override values lo
 | RAVALINK_AUDIO_MAX_DECODED_CACHE_BYTES | Compressed source cache/seek budget |
 | RAVALINK_AUDIO_MAX_ACTIVE_DECODED_PCM_BYTES | Aggregate decoded PCM memory budget for active players |
 | RAVALINK_PLUGINS_DIRECTORY | Directory used to discover community plugin manifests |
-| RAVALINK_YOUTUBE_COOKIES_FILE | Optional Netscape-format YouTube browser cookies file |\n| RAVALINK_YOUTUBE_OAUTH_CLIENT_ID | Google OAuth client ID for Device Flow |\n| RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE | Private path used to persist OAuth access/refresh tokens |
+| RAVALINK_YOUTUBE_COOKIES_FILE | Optional Netscape-format YouTube browser cookies file |
+| RAVALINK_YOUTUBE_OAUTH_CLIENT_ID | Google OAuth client ID for Device Flow |
+| RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE | Private path used to persist OAuth access/refresh tokens |
 | RAVALINK_METRICS_PROMETHEUS_ENABLED | Enable the Prometheus endpoint |
 | RAVALINK_METRICS_PROMETHEUS_ENDPOINT | Prometheus endpoint path |
 
