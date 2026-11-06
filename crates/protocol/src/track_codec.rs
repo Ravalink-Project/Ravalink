@@ -433,7 +433,10 @@ mod tests {
 
     #[test]
     fn native_music_provider_sources_round_trip_without_extra_payloads() {
-        for source_name in ["spotify", "applemusic", "deezer"] {
+        for source_name in [
+            "youtube", "soundcloud", "bandcamp", "vimeo", "twitch", "nico", "getyarn",
+            "yandexmusic", "beam", "spotify", "applemusic", "deezer",
+        ] {
             let mut track = sample_track();
             track.info.source_name = source_name.to_owned();
             track.encoded = encode_track(&track).unwrap();
