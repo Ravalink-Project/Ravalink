@@ -2136,6 +2136,11 @@ mod server_api_tests {
     use axum::{body::to_bytes, http::HeaderValue};
 
     fn state() -> AppState {
+        let mut plugins = PluginRegistry::default();
+        plugins.register(YouTubePlugin::default());
+        plugins.register(LavaSrcPlugin::default());
+        plugins.register(LavaSearchPlugin::default());
+
         AppState {
             password: "test-password".into(),
             sessions: SessionStore::default(),
@@ -2144,7 +2149,7 @@ mod server_api_tests {
             voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_sources: HttpSourceManager::default(),
             playback_sources: PlaybackSourceStore::new(256 * 1024 * 1024),
-            plugins: built_in_plugins(&[], std::path::Path::new("plugins")).unwrap(),
+            plugins,
             metrics_enabled: false,
             player_update_interval: 5,
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),
