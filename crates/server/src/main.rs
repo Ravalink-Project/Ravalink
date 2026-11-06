@@ -300,8 +300,8 @@ async fn built_in_plugins(
     )
     .await
     .map_err(|error| error.message)?;
-    plugins.register(youtube_plugin);
-    plugins.register(LavaSrcPlugin::default());
+    plugins.register(youtube_plugin.clone());
+    plugins.register(LavaSrcPlugin::new(youtube_plugin));
     plugins.register(LavaSearchPlugin::default());
     for plugin in external {
         plugins.register(
