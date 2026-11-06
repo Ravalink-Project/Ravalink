@@ -2389,7 +2389,8 @@ mod server_api_tests {
         use futures_util::StreamExt;
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-        let state = state();
+        let mut state = state();
+        state.player_update_interval = 1;
         let app = Router::new()
             .route("/v4/websocket", get(websocket))
             .with_state(state.clone());
@@ -2463,6 +2464,31 @@ mod server_api_tests {
         assert_eq!(event["type"], "TrackStartEvent");
         assert_eq!(event["guildId"], "123456");
         assert_eq!(event["track"]["encoded"], event_track);
+
+        state
+            .players
+            .update(
+                &session_id,
+                "123456",
+                serde_json::json!({"track": null, "volume": 100}),
+            )
+            .await;
+        let update = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let message = socket.next().await.unwrap().unwrap().into_text().unwrap();
+                let value: serde_json::Value = serde_json::from_str(&message).unwrap();
+                if value["op"] == "playerUpdate" {
+                    break value;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(update["guildId"], "123456");
+        assert!(update["state"]["time"].as_u64().is_some());
+        assert_eq!(update["state"]["position"], 0);
+        assert_eq!(update["state"]["connected"], false);
+        assert_eq!(update["state"]["ping"], -1);
 
         state
             .sessions
