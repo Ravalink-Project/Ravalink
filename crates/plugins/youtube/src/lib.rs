@@ -604,11 +604,11 @@ async fn load_or_authorize(
                 refresh_access_token(&http, client_id, client_secret, &token.refresh_token)
                     .await
                     .map_err(|error| {
-                    PluginError::new(
-                        "youtube",
-                        format!("cannot refresh stored OAuth token: {error}"),
-                    )
-                })?;
+                        PluginError::new(
+                            "youtube",
+                            format!("cannot refresh stored OAuth token: {error}"),
+                        )
+                    })?;
             if refreshed.refresh_token.is_empty() {
                 refreshed.refresh_token = token.refresh_token;
             }
