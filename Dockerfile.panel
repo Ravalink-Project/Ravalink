@@ -15,7 +15,7 @@ USER root
 # Debian Trixie ships a newer glibc than the Debian yolk currently used by
 # many panels. The official release binaries are linked against GLIBC 2.39.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl passwd \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 container \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash container
