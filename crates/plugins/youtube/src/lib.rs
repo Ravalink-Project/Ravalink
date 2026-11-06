@@ -308,7 +308,7 @@ fn track_from_video(video: &ytdown::VideoInfo) -> Result<Track, PluginError> {
         .map(|thumbnail| thumbnail.url.clone());
     let length = video
         .duration
-        .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
         .unwrap_or_default();
     let mut track = Track {
         encoded: String::new(),
@@ -363,7 +363,7 @@ fn track_from_entry_fields(
         ));
     }
     let length = duration
-        .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
         .unwrap_or_default();
     let mut track = Track {
         encoded: String::new(),
