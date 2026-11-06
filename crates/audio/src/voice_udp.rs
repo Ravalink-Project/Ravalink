@@ -229,9 +229,16 @@ mod tests {
             server.recv_from(&mut request).await.unwrap();
         });
 
-        let error = DiscordUdpTransport::discover(remote, 99, Duration::from_millis(20))
-            .await
-            .unwrap_err();
+        let error = match DiscordUdpTransport::discover(
+            remote,
+            99,
+            Duration::from_millis(20),
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("UDP discovery unexpectedly succeeded without a response"),
+        };
         assert!(error.message.contains("discovery timed out"));
         receive.await.unwrap();
     }
