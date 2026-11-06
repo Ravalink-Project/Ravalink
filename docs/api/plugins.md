@@ -1,13 +1,16 @@
 ---
-description: Build a native extension for RavaLink.
+description: RavaLink plugin API and extension development.
 ---
 
-# Build a RavaLink extension
+# Plugin API and extensions
 
-RavaLink does not load Java JAR files or use the original Lavalink Spring plugin API.
+RavaLink does not load Java JAR files or implement the original Lavalink Spring plugin API.
 
-The supported external extension mechanism launches a configured native executable as a child process and exchanges versioned JSON messages over standard input and output.
+There are two supported extension paths:
 
-See the [external process extension guide](../plugins/external-process.md) for the plugin manifest format, process configuration, request and response schemas, execution limits and security considerations.
+- **Native Rust plugins**, compiled into the RavaLink workspace and implementing the `RavaLinkPlugin` trait.
+- **External process plugins**, independent executables communicating through versioned JSON over stdin/stdout.
 
-Built-in provider integrations live in the Rust workspace. Significant new extension points should be discussed with the maintainers in the [RavaLink Discord](https://discord.gg/PBxB5eFNUp) before implementation.
+Start with the [plugin overview](../plugins/index.md), then choose the [native Rust development guide](../plugins/native-rust.md) or the [external process protocol](../plugins/external-process.md).
+
+The external process interface is a resolver extension point. It does not expose arbitrary server internals, Discord voice transport hooks, custom decoder registration or REST route registration.

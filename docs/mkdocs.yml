@@ -4,6 +4,7 @@ site_name: RavaLink Documentation
 site_description: Documentation for the native Rust Lavalink-compatible audio node.
 site_author: RavaLink Contributors
 site_dir: ../site
+
 docs_dir: .
 
 repo_name: RavaLink
@@ -22,7 +23,7 @@ nav:
       - Troubleshooting: getting-started/troubleshooting.md
       - FAQ: getting-started/faq.md
   - Deployment:
-      - Pelican and Pterodactyl: deployment/pelican-pterodactyl.md
+      - Pelican and Pterodactty: deployment/pelican-pterodactyl.md
   - Configuration:
       - configuration/index.md
       - Config:
