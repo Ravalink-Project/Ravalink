@@ -223,7 +223,11 @@ impl Config {
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_CLIENT_SECRET") {
             let value = value.trim();
-            config.youtube.oauth_client_secret = if value.is_empty() {\n                None\n            } else {\n                Some(value.to_owned())\n            };
+            config.youtube.oauth_client_secret = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_owned())
+            };
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE") {
             let value = value.trim();
@@ -240,7 +244,8 @@ impl Config {
         ];
         if oauth_fields.iter().any(|value| *value) && !oauth_fields.iter().all(|value| *value) {
             return Err(
-                "youtube.oauth_client_id, youtube.oauth_client_secret and youtube.oauth_token_file must be configured together"\n                    .to_owned(),
+                "youtube.oauth_client_id, youtube.oauth_client_secret and youtube.oauth_token_file must be configured together"
+                    .to_owned(),
             );
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_COOKIES_FILE") {
