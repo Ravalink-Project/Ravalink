@@ -954,10 +954,11 @@ async fn update_player(
                         .unwrap_or(false)
                 ),
             );
-        let (track, stream_url, stream_headers) = match resolve_player_track(&state, &fields).await {
-            Ok(resolved) => resolved,
-            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
-        };
+        let (track, stream_url, stream_headers) =
+            match resolve_player_track(&state, &fields).await {
+                Ok(resolved) => resolved,
+                Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
+            };
         let audio_track = AudioTrack {
             identifier: track.info.identifier.clone(),
             title: track.info.title.clone(),
@@ -1718,7 +1719,8 @@ async fn resolve_player_track(
             .uri
             .clone()
             .ok_or_else(|| "plugin track has no source URI".to_owned())?;
-        let (mut plugin_track, stream_url, stream_headers) = resolve_plugin_audio_track(state, &uri).await?;
+        let (mut plugin_track, stream_url, stream_headers) =
+            resolve_plugin_audio_track(state, &uri).await?;
         plugin_track.info.position = position;
         plugin_track.encoded = encode_track(&plugin_track).map_err(|error| error.message)?;
         return Ok((plugin_track, stream_url, stream_headers));
