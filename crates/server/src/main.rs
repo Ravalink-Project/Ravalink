@@ -30,9 +30,9 @@ use ravalink_protocol::{
 };
 use serde::Deserialize;
 use std::{
+    backtrace::Backtrace,
     collections::HashMap,
     sync::Arc,
-    backtrace::Backtrace,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use sysinfo::System;
@@ -2075,7 +2075,8 @@ async fn add_error_trace(request: Request, next: Next) -> Response {
 
 async fn add_trace_field(mut response: Response, include_trace: bool) -> Response {
     let trace = response.extensions_mut().remove::<String>();
-    if !include_trace || !response.status().is_client_error() && !response.status().is_server_error()
+    if !include_trace
+        || !response.status().is_client_error() && !response.status().is_server_error()
     {
         return response;
     }
@@ -2094,9 +2095,7 @@ async fn add_trace_field(mut response: Response, include_trace: bool) -> Respons
         return Response::from_parts(parts, Body::from(bytes));
     };
     object.insert("trace".into(), serde_json::Value::String(trace.to_string()));
-    let body = Body::from(
-        serde_json::to_vec(&payload).expect("JSON error payload serializes"),
-    );
+    let body = Body::from(serde_json::to_vec(&payload).expect("JSON error payload serializes"));
     Response::from_parts(parts, body)
 }
 
@@ -2155,7 +2154,9 @@ mod server_api_tests {
             false,
         )
         .await;
-        let body = to_bytes(without_trace.into_body(), usize::MAX).await.unwrap();
+        let body = to_bytes(without_trace.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(value.get("trace").is_none());
 
@@ -2166,7 +2167,11 @@ mod server_api_tests {
         .await;
         let body = to_bytes(with_trace.into_body(), usize::MAX).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(value["trace"].as_str().is_some_and(|trace| !trace.is_empty()));
+        assert!(
+            value["trace"]
+                .as_str()
+                .is_some_and(|trace| !trace.is_empty())
+        );
         assert_eq!(value["message"], "missing");
     }
 
@@ -2174,7 +2179,9 @@ mod server_api_tests {
     fn trace_query_requires_an_explicit_true_value() {
         assert!(trace_requested(&"/v4/missing?trace=true".parse().unwrap()));
         assert!(!trace_requested(&"/v4/missing".parse().unwrap()));
-        assert!(!trace_requested(&"/v4/missing?trace=false".parse().unwrap()));
+        assert!(!trace_requested(
+            &"/v4/missing?trace=false".parse().unwrap()
+        ));
         assert!(!trace_requested(&"/v4/missing?other=true".parse().unwrap()));
     }
 
