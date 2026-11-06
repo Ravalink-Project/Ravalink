@@ -46,9 +46,26 @@ pub struct ProviderIdentifier {
 
 #[derive(Clone)]
 pub struct LavaSrcPlugin {
-    youtube: YouTubePlugin,
+    youtube: Arc<dyn YouTubeResolver>,
     client: reqwest::Client,
     spotify_token: Arc<Mutex<Option<(String, Instant)>>>,
+}
+
+#[async_trait]
+trait YouTubeResolver: Send + Sync {
+    async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, PluginError>;
+    async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError>;
+}
+
+#[async_trait]
+impl YouTubeResolver for YouTubePlugin {
+    async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, PluginError> {
+        YouTubePlugin::search_tracks(self, query).await
+    }
+
+    async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
+        YouTubePlugin::resolve_video(self, video_id).await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -60,10 +77,14 @@ struct ExternalTrack {
     isrc: Option<String>,
 }
 
-impl Default for LavaSrcPlugin {
-    fn default() -> Self {
+impl LavaSrcPlugin {
+    pub fn new(youtube: YouTubePlugin) -> Self {
+        Self::with_resolver(Arc::new(youtube))
+    }
+
+    fn with_resolver(youtube: Arc<dyn YouTubeResolver>) -> Self {
         Self {
-            youtube: YouTubePlugin::default(),
+            youtube,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .user_agent(format!(
@@ -74,6 +95,12 @@ impl Default for LavaSrcPlugin {
                 .expect("valid default HTTP client"),
             spotify_token: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl Default for LavaSrcPlugin {
+    fn default() -> Self {
+        Self::new(YouTubePlugin::default())
     }
 }
 
@@ -1042,55 +1069,58 @@ fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ravalink_protocol::TrackInfo;
 
-    async fn mock_youtube_api(
-        search_result: serde_json::Value,
-        video_result: serde_json::Value,
-    ) -> String {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[derive(Clone)]
+    struct MockYouTubeResolver {
+        candidates: Vec<Track>,
+        resolved: Track,
+    }
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            for body in [search_result.to_string(), video_result.to_string()] {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let mut request = [0_u8; 4_096];
-                let _ = stream.read(&mut request).await;
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                stream.write_all(response.as_bytes()).await.unwrap();
-            }
-        });
-        format!("http://{address}")
+    #[async_trait]
+    impl YouTubeResolver for MockYouTubeResolver {
+        async fn search_tracks(&self, _query: &str) -> Result<Vec<Track>, PluginError> {
+            Ok(self.candidates.clone())
+        }
+
+        async fn resolve_video(&self, _video_id: &str) -> Result<Track, PluginError> {
+            Ok(self.resolved.clone())
+        }
+    }
+
+    fn mock_youtube_track() -> Track {
+        let mut track = Track {
+            encoded: String::new(),
+            info: TrackInfo {
+                identifier: "dQw4w9WgXcQ".into(),
+                is_seekable: true,
+                author: "Example Artist".into(),
+                length: 200_000,
+                is_stream: false,
+                position: 0,
+                title: "Example Track".into(),
+                uri: Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ".into()),
+                source_name: "youtube".into(),
+                artwork_url: None,
+                isrc: None,
+            },
+            plugin_info: json!({"streamUrl": "https://media.example/audio.webm"}),
+            user_data: json!({}),
+        };
+        track.encoded = encode_track(&track).unwrap();
+        track
+    }
+
+    fn mock_lavasrc_plugin(candidates: Vec<Track>) -> LavaSrcPlugin {
+        LavaSrcPlugin::with_resolver(Arc::new(MockYouTubeResolver {
+            candidates,
+            resolved: mock_youtube_track(),
+        }))
     }
 
     #[tokio::test]
     async fn matches_external_catalog_track_to_playable_youtube_audio() {
-        let search_result = json!([{
-            "videoId": "dQw4w9WgXcQ",
-            "title": "Example Track",
-            "author": "Example Artist",
-            "lengthSeconds": 200
-        }]);
-        let video_result = json!({
-            "videoId": "dQw4w9WgXcQ",
-            "title": "Example Track",
-            "author": "Example Artist",
-            "lengthSeconds": 200,
-            "adaptiveFormats": [{
-                "type": "audio/webm; codecs=opus",
-                "bitrate": 160000,
-                "url": "https://media.example/audio.webm"
-            }]
-        });
-        let api_base = mock_youtube_api(search_result, video_result).await;
-        let plugin = LavaSrcPlugin {
-            youtube: YouTubePlugin::new(api_base),
-            client: reqwest::Client::new(),
-            spotify_token: Arc::new(Mutex::new(None)),
-        };
+        let plugin = mock_lavasrc_plugin(vec![mock_youtube_track()]);
         let parsed = ProviderIdentifier {
             provider: MusicProvider::Spotify,
             content_type: "track".into(),
@@ -1134,12 +1164,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_external_track_when_youtube_search_has_no_matches() {
-        let api_base = mock_youtube_api(json!([]), json!({})).await;
-        let plugin = LavaSrcPlugin {
-            youtube: YouTubePlugin::new(api_base),
-            client: reqwest::Client::new(),
-            spotify_token: Arc::new(Mutex::new(None)),
-        };
+        let plugin = mock_lavasrc_plugin(Vec::new());
         let parsed = ProviderIdentifier {
             provider: MusicProvider::Deezer,
             content_type: "track".into(),

@@ -287,16 +287,21 @@ fn requested_track_identifier(fields: &serde_json::Map<String, serde_json::Value
         })
 }
 
-fn built_in_plugins(
+async fn built_in_plugins(
     external: &[config::ExternalPluginConfig],
     youtube: &config::YouTubeConfig,
     plugin_directory: &std::path::Path,
 ) -> Result<PluginRegistry, String> {
     let mut plugins = PluginRegistry::default();
-    let youtube_plugin =
-        YouTubePlugin::new(youtube.cookies_file.as_deref()).map_err(|error| error.message)?;
-    plugins.register(youtube_plugin);
-    plugins.register(LavaSrcPlugin::default());
+    let youtube_plugin = YouTubePlugin::new(
+        youtube.cookies_file.as_deref(),
+        youtube.oauth_client_id.as_deref(),
+        youtube.oauth_token_file.as_deref(),
+    )
+    .await
+    .map_err(|error| error.message)?;
+    plugins.register(youtube_plugin.clone());
+    plugins.register(LavaSrcPlugin::new(youtube_plugin));
     plugins.register(LavaSearchPlugin::default());
     for plugin in external {
         plugins.register(
@@ -353,6 +358,7 @@ async fn main() {
         ),
         playback_sources: PlaybackSourceStore::new(config.audio.max_decoded_cache_bytes),
         plugins: built_in_plugins(&config.plugins, &config.youtube, &config.plugin_directory)
+            .await
             .expect("failed to load configured plugins"),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
@@ -2130,6 +2136,11 @@ mod server_api_tests {
     use axum::{body::to_bytes, http::HeaderValue};
 
     fn state() -> AppState {
+        let mut plugins = PluginRegistry::default();
+        plugins.register(YouTubePlugin::default());
+        plugins.register(LavaSrcPlugin::default());
+        plugins.register(LavaSearchPlugin::default());
+
         AppState {
             password: "test-password".into(),
             sessions: SessionStore::default(),
@@ -2138,7 +2149,7 @@ mod server_api_tests {
             voice_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_sources: HttpSourceManager::default(),
             playback_sources: PlaybackSourceStore::new(256 * 1024 * 1024),
-            plugins: built_in_plugins(&[], std::path::Path::new("plugins")).unwrap(),
+            plugins,
             metrics_enabled: false,
             player_update_interval: 5,
             system: Arc::new(tokio::sync::Mutex::new(System::new_all())),

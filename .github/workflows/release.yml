@@ -101,3 +101,38 @@ jobs:
             dist/ravalink-linux-x86_64
             dist/ravalink-linux-aarch64
             dist/SHA256SUMS
+
+  panel-image:
+    name: Publish Pelican and Pterodactyl Docker image
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push multi-architecture panel image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.panel
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            RAVALINK_VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/ravalink-project/ravalink:${{ github.ref_name }}
+            ghcr.io/ravalink-project/ravalink:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/Ravalink-Project/Ravalink
+            org.opencontainers.image.version=${{ github.ref_name }}

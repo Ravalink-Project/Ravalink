@@ -28,6 +28,11 @@ max_active_decoded_pcm_bytes = 268435456
 # Optional Netscape cookies.txt exported from a browser. Protect this file like a password.
 # Enables authenticated requests and age-restricted video access where permitted.
 # cookies_file = "/home/container/config/youtube-cookies.txt"
+# Optional Google OAuth Device Flow. Create an OAuth client for TVs and limited-input devices.
+# On first start, RavaLink prints a verification URL and code in its logs.
+# Keep the token file private; it contains a long-lived refresh token.
+# oauth_client_id = "YOUR_GOOGLE_OAUTH_CLIENT_ID"
+# oauth_token_file = "/home/container/config/youtube-oauth-token.json"
 
 [metrics]
 prometheus_enabled = false
