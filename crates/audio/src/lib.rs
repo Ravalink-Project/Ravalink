@@ -2174,6 +2174,33 @@ mod streamed_queue_tests {
     }
 
     #[tokio::test]
+    async fn decoder_stops_when_the_pcm_consumer_cancels() {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&40_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&48_000_u32.to_le_bytes());
+        wav.extend_from_slice(&192_000_u32.to_le_bytes());
+        wav.extend_from_slice(&4_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&4_u32.to_le_bytes());
+        wav.extend_from_slice(&0_i16.to_le_bytes());
+        wav.extend_from_slice(&16_384_i16.to_le_bytes());
+
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        drop(receiver);
+
+        let error = decode_bytes_to_channel(wav, Some("wav".into()), 64, sender)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("consumer closed"));
+    }
+
+    #[tokio::test]
     async fn streamed_queue_rejects_seek_until_a_seekable_source_is_reopened() {
         let (_sender, receiver) = tokio::sync::mpsc::channel(1);
         let mut player = NativePlayer::default();
