@@ -2448,6 +2448,22 @@ mod server_api_tests {
         assert_eq!(ready["resumed"], false);
         let session_id = ready["sessionId"].as_str().unwrap().to_owned();
 
+        let event_track = encoded_api_test_track();
+        publish_track_start(&state, "another-session", "987654", event_track.clone());
+        publish_track_start(&state, &session_id, "123456", event_track.clone());
+        let event = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap();
+        let event: serde_json::Value = serde_json::from_str(&event).unwrap();
+        assert_eq!(event["op"], "event");
+        assert_eq!(event["type"], "TrackStartEvent");
+        assert_eq!(event["guildId"], "123456");
+        assert_eq!(event["track"]["encoded"], event_track);
+
         state
             .sessions
             .update(&session_id, Some(true), Some(120))
