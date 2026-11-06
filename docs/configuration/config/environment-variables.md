@@ -27,7 +27,7 @@ RavaLink environment variables use the RAVALINK_ prefix. They override values lo
 
 Provider integrations also read provider-specific environment variables:
 
-- RAVALINK_YOUTUBE_API_BASE
+- YouTube extraction is built in and uses YouTube InnerTube directly; no public Invidious instance URL is configured.
 - RAVALINK_SPOTIFY_CLIENT_ID
 - RAVALINK_SPOTIFY_CLIENT_SECRET
 - RAVALINK_APPLE_MUSIC_TOKEN
