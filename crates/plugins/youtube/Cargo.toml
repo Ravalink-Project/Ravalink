@@ -11,4 +11,4 @@ ravalink-plugin-api = { path = "../plugin-api" }
 ravalink-protocol = { path = "../../protocol" }
 serde_json.workspace = true
 tokio.workspace = true
-ytdown = { version = "0.8.1", default-features = false, features = ["rustls-tls"] }
+ytdown = { version = "0.8.1", default-features = false, features = ["native-tls-vendored"] }
