@@ -2054,7 +2054,9 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
         }),
     )
         .into_response();
-    response.extensions_mut().insert(Backtrace::force_capture());
+    response
+        .extensions_mut()
+        .insert(Backtrace::force_capture().to_string());
     response
 }
 
@@ -2072,7 +2074,7 @@ async fn add_error_trace(request: Request, next: Next) -> Response {
 }
 
 async fn add_trace_field(mut response: Response, include_trace: bool) -> Response {
-    let trace = response.extensions_mut().remove::<Backtrace>();
+    let trace = response.extensions_mut().remove::<String>();
     if !include_trace || !response.status().is_client_error() && !response.status().is_server_error()
     {
         return response;
