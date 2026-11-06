@@ -60,10 +60,10 @@ struct ExternalTrack {
     isrc: Option<String>,
 }
 
-impl Default for LavaSrcPlugin {
-    fn default() -> Self {
+impl LavaSrcPlugin {
+    pub fn new(youtube: YouTubePlugin) -> Self {
         Self {
-            youtube: YouTubePlugin::default(),
+            youtube,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .user_agent(format!(
@@ -74,6 +74,12 @@ impl Default for LavaSrcPlugin {
                 .expect("valid default HTTP client"),
             spotify_token: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl Default for LavaSrcPlugin {
+    fn default() -> Self {
+        Self::new(YouTubePlugin::default())
     }
 }
 
@@ -1087,7 +1093,7 @@ mod tests {
         });
         let api_base = mock_youtube_api(search_result, video_result).await;
         let plugin = LavaSrcPlugin {
-            youtube: YouTubePlugin::new(api_base),
+            youtube: YouTubePlugin::with_api_base(api_base).unwrap(),
             client: reqwest::Client::new(),
             spotify_token: Arc::new(Mutex::new(None)),
         };
