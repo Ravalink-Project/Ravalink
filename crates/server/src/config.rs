@@ -9,6 +9,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub logging: LoggingConfig,
     pub audio: AudioConfig,
+    pub youtube: YouTubeConfig,
     pub metrics: MetricsConfig,
     #[serde(default = "default_plugin_directory")]
     pub plugin_directory: PathBuf,
@@ -25,6 +26,7 @@ impl Default for Config {
             server: ServerConfig::default(),
             logging: LoggingConfig::default(),
             audio: AudioConfig::default(),
+            youtube: YouTubeConfig::default(),
             metrics: MetricsConfig::default(),
             plugin_directory: default_plugin_directory(),
             plugins: Vec::new(),
@@ -112,6 +114,14 @@ impl Default for AudioConfig {
     }
 }
 
+/// YouTube authentication and extraction settings.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct YouTubeConfig {
+    /// Netscape-format browser cookies.txt. Treat this file as a password.
+    pub cookies_file: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct MetricsConfig {
@@ -196,6 +206,14 @@ impl Config {
         }
         if let Ok(value) = env::var("RAVALINK_PLUGINS_DIRECTORY") {
             config.plugin_directory = PathBuf::from(value);
+        }
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_COOKIES_FILE") {
+            let value = value.trim();
+            config.youtube.cookies_file = if value.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(value))
+            };
         }
         if let Ok(value) = env::var("RAVALINK_METRICS_PROMETHEUS_ENABLED") {
             config.metrics.prometheus_enabled =
