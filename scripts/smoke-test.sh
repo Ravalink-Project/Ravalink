@@ -116,6 +116,15 @@ grep -q '"status":404' "$response_file"
 grep -q '"error":"Not Found"' "$response_file"
 grep -q '"path":"/v4/sessions/ravalink-smoke-missing/players"' "$response_file"
 
+# Optional stack trace is present only when explicitly requested.
+assert_status 404 "${auth[@]}" "$base/v4/sessions/ravalink-smoke-missing/players?trace=true"
+grep -q '"trace":"' "$response_file"
+assert_status 404 "${auth[@]}" "$base/v4/sessions/ravalink-smoke-missing/players?trace=false"
+if grep -q '"trace"' "$response_file"; then
+  echo "trace=false unexpectedly included a stack trace." >&2
+  exit 1
+fi
+
 # Disabled metrics are not exposed.
 assert_status 404 "$base/metrics"
 
