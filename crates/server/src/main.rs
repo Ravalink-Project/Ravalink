@@ -2,11 +2,13 @@ pub mod config;
 
 use axum::{
     Json, Router,
+    body::{Body, to_bytes},
     extract::{
-        Path, Query, State, WebSocketUpgrade,
+        Path, Query, Request, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, Uri},
+    middleware::{Next, from_fn},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -30,6 +32,7 @@ use serde::Deserialize;
 use std::{
     collections::HashMap,
     sync::Arc,
+    backtrace::Backtrace,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use sysinfo::System;
@@ -407,7 +410,7 @@ async fn main() {
     } else {
         app
     };
-    let app = app.with_state(state);
+    let app = app.with_state(state).layer(from_fn(add_error_trace));
 
     let socket = format!("{address}:{port}");
     let listener = TcpListener::bind(&socket)
@@ -2040,7 +2043,7 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    (
+    let mut response = (
         status,
         Json(ApiError {
             timestamp,
@@ -2050,7 +2053,49 @@ fn api_error(status: StatusCode, message: &str, path: &str) -> Response {
             path: path.to_owned(),
         }),
     )
-        .into_response()
+        .into_response();
+    response.extensions_mut().insert(Backtrace::force_capture());
+    response
+}
+
+fn trace_requested(uri: &Uri) -> bool {
+    uri.query()
+        .unwrap_or_default()
+        .split('&')
+        .any(|parameter| parameter == "trace=true")
+}
+
+async fn add_error_trace(request: Request, next: Next) -> Response {
+    let include_trace = trace_requested(request.uri());
+    let response = next.run(request).await;
+    add_trace_field(response, include_trace).await
+}
+
+async fn add_trace_field(mut response: Response, include_trace: bool) -> Response {
+    let trace = response.extensions_mut().remove::<Backtrace>();
+    if !include_trace || !response.status().is_client_error() && !response.status().is_server_error()
+    {
+        return response;
+    }
+    let Some(trace) = trace else {
+        return response;
+    };
+
+    let (parts, body) = response.into_parts();
+    let Ok(bytes) = to_bytes(body, 1024 * 1024).await else {
+        return Response::from_parts(parts, Body::empty());
+    };
+    let Ok(mut payload) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    let Some(object) = payload.as_object_mut() else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    object.insert("trace".into(), serde_json::Value::String(trace.to_string()));
+    let body = Body::from(
+        serde_json::to_vec(&payload).expect("JSON error payload serializes"),
+    );
+    Response::from_parts(parts, body)
 }
 
 #[cfg(test)]
@@ -2099,6 +2144,36 @@ mod server_api_tests {
         assert_eq!(value["error"], "Not Found");
         assert_eq!(value["message"], "Session not found");
         assert_eq!(value["path"], "/v4/sessions/missing");
+    }
+
+    #[tokio::test]
+    async fn api_error_trace_is_only_serialized_when_requested() {
+        let without_trace = add_trace_field(
+            api_error(StatusCode::NOT_FOUND, "missing", "/v4/missing"),
+            false,
+        )
+        .await;
+        let body = to_bytes(without_trace.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value.get("trace").is_none());
+
+        let with_trace = add_trace_field(
+            api_error(StatusCode::NOT_FOUND, "missing", "/v4/missing"),
+            true,
+        )
+        .await;
+        let body = to_bytes(with_trace.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value["trace"].as_str().is_some_and(|trace| !trace.is_empty()));
+        assert_eq!(value["message"], "missing");
+    }
+
+    #[test]
+    fn trace_query_requires_an_explicit_true_value() {
+        assert!(trace_requested(&"/v4/missing?trace=true".parse().unwrap()));
+        assert!(!trace_requested(&"/v4/missing".parse().unwrap()));
+        assert!(!trace_requested(&"/v4/missing?trace=false".parse().unwrap()));
+        assert!(!trace_requested(&"/v4/missing?other=true".parse().unwrap()));
     }
 
     #[test]
