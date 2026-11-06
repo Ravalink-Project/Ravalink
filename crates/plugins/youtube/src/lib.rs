@@ -23,12 +23,6 @@ pub struct YouTubePlugin {
     extractor: Arc<Ytdown>,
 }
 
-impl Default for YouTubePlugin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YouTubeIdentifier {
     pub video_id: Option<String>,
@@ -40,13 +34,15 @@ impl YouTubePlugin {
     /// Build the native extractor, optionally authenticating with a browser
     /// Netscape cookies.txt export. ytdown derives SAPISIDHASH automatically.
     pub fn new(cookies_file: Option<&Path>) -> Result<Self, PluginError> {
-        let builder = Ytdown::builder()
-            .user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
+        let builder = Ytdown::builder().user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
         let builder = if let Some(path) = cookies_file {
             let contents = std::fs::read_to_string(path).map_err(|error| {
                 PluginError::new(
                     "youtube",
-                    format!("cannot read YouTube cookies file {}: {error}", path.display()),
+                    format!(
+                        "cannot read YouTube cookies file {}: {error}",
+                        path.display()
+                    ),
                 )
             })?;
             let jar = CookieJar::parse_netscape(&contents).map_err(|error| {
