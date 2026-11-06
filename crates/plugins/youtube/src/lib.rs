@@ -575,7 +575,7 @@ async fn refresh_access_token(http: &reqwest::Client, client_id: &str, refresh_t
 }
 
 fn save_token(path: &Path, token: &OAuthToken) -> Result<(), PluginError> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|error| PluginError::new("youtube", format!("cannot create OAuth token directory: {error}")))?;
     }
     let data = serde_json::to_vec_pretty(token).map_err(|error| PluginError::new("youtube", format!("cannot serialize OAuth token: {error}")))?;
