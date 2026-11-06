@@ -154,8 +154,14 @@ impl HttpSourceManager {
         position_ms: u64,
         sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
     ) -> Result<(), AudioError> {
-        self.stream_to_channel_with_headers(identifier, &[], max_pcm_bytes, position_ms, sender)
-            .await
+        self.stream_to_channel_with_headers(
+            identifier,
+            &[],
+            max_pcm_bytes,
+            position_ms,
+            sender,
+        )
+        .await
     }
 
     /// Stream a remote audio source with extractor-provided request headers.
@@ -181,14 +187,14 @@ impl HttpSourceManager {
         }
         let mut response = tokio::time::timeout(Duration::from_secs(15), request.send())
             .await
-                .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
-                .map_err(|error| {
-                    AudioError::invalid(format!("HTTP source request failed: {error}"))
-                })?
-                .error_for_status()
-                .map_err(|error| {
-                    AudioError::invalid(format!("HTTP source returned an error: {error}"))
-                })?;
+            .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
+            .map_err(|error| {
+                AudioError::invalid(format!("HTTP source request failed: {error}"))
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                AudioError::invalid(format!("HTTP source returned an error: {error}"))
+            })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
