@@ -297,7 +297,9 @@ async fn built_in_plugins(
         youtube.cookies_file.as_deref(),
         youtube.oauth_client_id.as_deref(),
         youtube.oauth_token_file.as_deref(),
-    ).await.map_err(|error| error.message)?;
+    )
+    .await
+    .map_err(|error| error.message)?;
     plugins.register(youtube_plugin);
     plugins.register(LavaSrcPlugin::default());
     plugins.register(LavaSearchPlugin::default());
