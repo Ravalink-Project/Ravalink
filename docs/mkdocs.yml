@@ -4,6 +4,7 @@ site_name: RavaLink Documentation
 site_description: Documentation for the native Rust Lavalink-compatible audio node.
 site_author: RavaLink Contributors
 site_dir: ../site
+
 docs_dir: .
 
 repo_name: RavaLink
@@ -21,6 +22,8 @@ nav:
       - Docker: getting-started/docker.md
       - Troubleshooting: getting-started/troubleshooting.md
       - FAQ: getting-started/faq.md
+  - Deployment:
+      - Pelican and Pterodactty: deployment/pelican-pterodactyl.md
   - Configuration:
       - configuration/index.md
       - Config:
@@ -29,10 +32,13 @@ nav:
           - Server: configuration/config/server.md
       - RoutePlanner: configuration/routeplanner.md
   - Clients: clients.md
-  - Plugins: plugins.md
+  - Plugins:
+      - plugins/index.md
+      - Built-in Rust plugins: plugins/native-rust.md
+      - External process plugins: plugins/external-process.md
   - API:
       - api/index.md
-      - Websocket: api/websocket.md
+      - WebSocket: api/websocket.md
       - REST: api/rest.md
   - Changelog: changelog/index.md
 
