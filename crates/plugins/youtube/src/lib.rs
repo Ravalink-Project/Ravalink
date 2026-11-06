@@ -11,8 +11,8 @@ use ravalink_plugin_api::{
 };
 use ravalink_protocol::{Track, TrackInfo, encode_track};
 use serde_json::json;
-use std::sync::Arc;
-use ytdown::{MediaInfo, Ytdown};
+use std::{path::Path, sync::Arc};
+use ytdown::{MediaInfo, Ytdown, cookies::CookieJar};
 
 const MAX_SEARCH_RESULTS: usize = 50;
 const MAX_PLAYLIST_TRACKS: usize = 500;
@@ -37,14 +37,31 @@ pub struct YouTubeIdentifier {
 }
 
 impl YouTubePlugin {
-    pub fn new() -> Self {
-        let extractor = Ytdown::builder()
-            .user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")))
+    /// Build the native extractor, optionally authenticating with a browser
+    /// Netscape cookies.txt export. ytdown derives SAPISIDHASH automatically.
+    pub fn new(cookies_file: Option<&Path>) -> Result<Self, PluginError> {
+        let builder = Ytdown::builder()
+            .user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
+        let builder = if let Some(path) = cookies_file {
+            let contents = std::fs::read_to_string(path).map_err(|error| {
+                PluginError::new(
+                    "youtube",
+                    format!("cannot read YouTube cookies file {}: {error}", path.display()),
+                )
+            })?;
+            let jar = CookieJar::parse_netscape(&contents).map_err(|error| {
+                PluginError::new("youtube", format!("invalid YouTube cookies file: {error}"))
+            })?;
+            builder.cookies(jar)
+        } else {
+            builder
+        };
+        let extractor = builder
             .build()
-            .expect("the embedded YouTube extractor HTTP client must build");
-        Self {
+            .map_err(|error| PluginError::new("youtube", error.to_string()))?;
+        Ok(Self {
             extractor: Arc::new(extractor),
-        }
+        })
     }
 
     pub fn parse_identifier(identifier: &str) -> Option<YouTubeIdentifier> {
