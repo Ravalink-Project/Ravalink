@@ -154,20 +154,11 @@ impl HttpSourceManager {
         position_ms: u64,
         sender: tokio::sync::mpsc::Sender<Result<PcmFrame, AudioError>>,
     ) -> Result<(), AudioError> {
-        self.stream_to_channel_with_headers(
-            identifier,
-            &[],
-            max_pcm_bytes,
-            position_ms,
-            sender,
-        )
-        .await
+        self.stream_to_channel_with_headers(identifier, &[], max_pcm_bytes, position_ms, sender)
+            .await
     }
 
-    /// Stream a remote audio source while applying extractor-provided HTTP headers.
-    ///
-    /// This is used for sources such as YouTube whose signed CDN URLs can require
-    /// the same request headers used during extraction.
+    /// Stream a remote audio source with extractor-provided request headers.
     pub async fn stream_to_channel_with_headers(
         &self,
         identifier: &str,
@@ -190,14 +181,14 @@ impl HttpSourceManager {
         }
         let mut response = tokio::time::timeout(Duration::from_secs(15), request.send())
             .await
-            .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
-            .map_err(|error| {
-                AudioError::invalid(format!("HTTP source request failed: {error}"))
-            })?
-            .error_for_status()
-            .map_err(|error| {
-                AudioError::invalid(format!("HTTP source returned an error: {error}"))
-            })?;
+                .map_err(|_| AudioError::invalid("HTTP source response headers timed out"))?
+                .map_err(|error| {
+                    AudioError::invalid(format!("HTTP source request failed: {error}"))
+                })?
+                .error_for_status()
+                .map_err(|error| {
+                    AudioError::invalid(format!("HTTP source returned an error: {error}"))
+                })?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -217,6 +208,63 @@ impl HttpSourceManager {
             loop {
                 let chunk =
                     match tokio::time::timeout(Duration::from_secs(60), response.chunk()).await {
+                        Err(_) => {
+                            let message = "HTTP media stream stalled for 60 seconds".to_owned();
+                            let _ = compressed_sender.send(Err(message.clone())).await;
+                            return Err(AudioError::invalid(message));
+                        }
+                        Ok(Err(error)) => {
+                            let message = format!("HTTP media stream failed: {error}");
+                            let _ = compressed_sender.send(Err(message.clone())).await;
+                            return Err(AudioError::invalid(message));
+                        }
+                        Ok(Ok(chunk)) => chunk,
+                    };
+                let Some(chunk) = chunk else {
+                    return Ok::<(), AudioError>(());
+                };
+                for part in chunk.chunks(MAX_COMPRESSED_CHUNK_BYTES) {
+                    if compressed_sender.send(Ok(part.to_vec())).await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+        });
+
+        let decoded = crate::decode_stream_to_channel_at(
+            compressed_receiver,
+            Some(
+                match probe {
+                    "MPEG" => "mp3",
+                    "WAV" => "wav",
+                    "FLAC" => "flac",
+                    "OGG" => "ogg",
+                    "ADTS" => "aac",
+                    "MP4" => "m4a",
+                    "MATROSKA" => "webm",
+                    _ => unreachable!("probe_name returns a known decoder format"),
+                }
+                .to_owned(),
+            ),
+            max_pcm_bytes,
+            position_ms,
+            sender,
+        )
+        .await;
+        match decoded {
+            Err(error) => {
+                // Preserve the decoder/consumer error. Aborting the network
+                // producer is expected here and must not mask the real failure
+                // with a cancelled-task JoinError.
+                producer.abort();
+                let _ = producer.await;
+                Err(error)
+            }
+            Ok(()) => producer.await.map_err(|error| {
+                AudioError::invalid(format!("HTTP stream task failed: {error}"))
+            })?,
+        }
+    }
 
     async fn streaming_client(&self, url: &reqwest::Url) -> Result<reqwest::Client, AudioError> {
         if !matches!(url.scheme(), "http" | "https") {
