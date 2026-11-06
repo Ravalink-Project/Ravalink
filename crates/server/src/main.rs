@@ -3321,4 +3321,99 @@ mod server_api_tests {
         assert_eq!(address.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(all.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
+
+    #[tokio::test]
+    async fn protected_rest_endpoints_reject_missing_and_invalid_credentials() {
+        let unauthorized = HeaderMap::new();
+        let mut forbidden = HeaderMap::new();
+        forbidden.insert("authorization", HeaderValue::from_static("wrong-password"));
+
+        let checks = [
+            version(unauthorized.clone(), State(state())).await.status(),
+            info_endpoint(unauthorized.clone(), State(state())).await.status(),
+            stats(unauthorized.clone(), State(state())).await.status(),
+            routeplanner_status(unauthorized.clone(), State(state())).await.status(),
+            version(forbidden.clone(), State(state())).await.status(),
+            info_endpoint(forbidden.clone(), State(state())).await.status(),
+            stats(forbidden.clone(), State(state())).await.status(),
+            routeplanner_status(forbidden, State(state())).await.status(),
+        ];
+
+        assert_eq!(
+            checks,
+            [
+                StatusCode::UNAUTHORIZED,
+                StatusCode::UNAUTHORIZED,
+                StatusCode::UNAUTHORIZED,
+                StatusCode::UNAUTHORIZED,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn session_and_player_routes_distinguish_missing_session_invalid_guild_and_missing_player() {
+        let state = state();
+        let missing_session = get_players(
+            authorized_headers(),
+            State(state.clone()),
+            Path("missing".into()),
+        )
+        .await;
+        assert_eq!(missing_session.status(), StatusCode::NOT_FOUND);
+
+        let session = state.sessions.create(123, None).await;
+        let invalid_guild = get_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "not-a-snowflake".into())),
+        )
+        .await;
+        assert_eq!(invalid_guild.status(), StatusCode::BAD_REQUEST);
+
+        let missing_player = get_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "123456789".into())),
+        )
+        .await;
+        assert_eq!(missing_player.status(), StatusCode::NOT_FOUND);
+
+        let missing_player_body = to_bytes(missing_player.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&missing_player_body).unwrap();
+        assert_eq!(error["status"], StatusCode::NOT_FOUND.as_u16());
+        assert_eq!(
+            error["path"],
+            format!("/v4/sessions/{}/players/123456789", session.id)
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_an_existing_player_returns_no_content_and_removes_state() {
+        let state = state();
+        let session = state.sessions.create(123, None).await;
+        state
+            .players
+            .update(
+                &session.id,
+                "123456789",
+                serde_json::json!({"track": null}),
+            )
+            .await;
+
+        let response = delete_player(
+            authorized_headers(),
+            State(state.clone()),
+            Path((session.id.clone(), "123456789".into())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(state.players.get(&session.id, "123456789").await.is_none());
+    }
+
 }
