@@ -415,7 +415,10 @@ mod tests {
         let encoded = "QAAAzgMAMUJsZWVkIEl0IE91dCBbT2ZmaWNpYWwgTXVzaWMgVmlkZW9dIC0gTGlua2luIFBhcmsAC0xpbmtpbiBQYXJrAAAAAAAClCgAC09udXVZY3FoekNFAAEAK2h0dHBzOi8vd3d3LnlvdXR1YmUuY29tL3dhdGNoP3Y9T251dVljcWh6Q0UBADRodHRwczovL2kueXRpbWcuY29tL3ZpL09udXVZY3FoekNFL21heHJlc2RlZmF1bHQuanBnAAAHeW91dHViZQAAAAAAAAAA";
         let track = decode_track(encoded).unwrap();
 
-        assert_eq!(track.info.title, "Bleed It Out [Official Music Video] - Linkin Park");
+        assert_eq!(
+            track.info.title,
+            "Bleed It Out [Official Music Video] - Linkin Park"
+        );
         assert_eq!(track.info.author, "Linkin Park");
         assert_eq!(track.info.length, 169_000);
         assert_eq!(track.info.identifier, "OnuuYcqhzCE");
@@ -434,8 +437,18 @@ mod tests {
     #[test]
     fn native_music_provider_sources_round_trip_without_extra_payloads() {
         for source_name in [
-            "youtube", "soundcloud", "bandcamp", "vimeo", "twitch", "nico", "getyarn",
-            "yandexmusic", "beam", "spotify", "applemusic", "deezer",
+            "youtube",
+            "soundcloud",
+            "bandcamp",
+            "vimeo",
+            "twitch",
+            "nico",
+            "getyarn",
+            "yandexmusic",
+            "beam",
+            "spotify",
+            "applemusic",
+            "deezer",
         ] {
             let mut track = sample_track();
             track.info.source_name = source_name.to_owned();
