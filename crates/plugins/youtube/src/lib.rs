@@ -898,6 +898,47 @@ mod tests {
     }
 
     #[test]
+    fn parses_google_oauth_device_code_response_defaults() {
+        let response: DeviceCodeResponse = serde_json::from_str(
+            r#"{
+                "device_code": "device",
+                "user_code": "ABCD-EFGH",
+                "verification_url": "https://www.google.com/device",
+                "expires_in": 1800
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(response.device_code, "device");
+        assert_eq!(response.user_code, "ABCD-EFGH");
+        assert_eq!(response.verification_url, "https://www.google.com/device");
+        assert_eq!(response.interval, 5);
+        assert_eq!(response.verification_url_complete, None);
+    }
+
+    #[test]
+    fn oauth_token_roundtrips_and_accepts_google_response_fields() {
+        let token: OAuthToken = serde_json::from_str(
+            r#"{
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "token_type": "Bearer",
+                "expires_in": 3600
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(token.access_token, "access");
+        assert_eq!(token.refresh_token, "refresh");
+        assert_eq!(token.expires_in, 3600);
+        assert_eq!(token.created_at, 0);
+
+        let serialized = serde_json::to_value(&token).unwrap();
+        assert_eq!(serialized["access_token"], "access");
+        assert_eq!(serialized["refresh_token"], "refresh");
+    }
+
+    #[test]
     fn creates_lavalink_track_metadata_from_video_entry() {
         let track = track_from_entry_fields(
             "dQw4w9WgXcQ",
