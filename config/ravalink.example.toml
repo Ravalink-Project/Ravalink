@@ -24,6 +24,11 @@ max_decoded_cache_bytes = 268435456
 # Maximum decoded PCM held by active native players.
 max_active_decoded_pcm_bytes = 268435456
 
+[youtube]
+# Optional Netscape cookies.txt exported from a browser. Protect this file like a password.
+# Enables authenticated requests and age-restricted video access where permitted.
+# cookies_file = "/home/container/config/youtube-cookies.txt"
+
 [metrics]
 prometheus_enabled = false
 prometheus_endpoint = "/metrics"
