@@ -287,14 +287,17 @@ fn requested_track_identifier(fields: &serde_json::Map<String, serde_json::Value
         })
 }
 
-fn built_in_plugins(
+async fn built_in_plugins(
     external: &[config::ExternalPluginConfig],
     youtube: &config::YouTubeConfig,
     plugin_directory: &std::path::Path,
 ) -> Result<PluginRegistry, String> {
     let mut plugins = PluginRegistry::default();
-    let youtube_plugin =
-        YouTubePlugin::new(youtube.cookies_file.as_deref()).map_err(|error| error.message)?;
+    let youtube_plugin = YouTubePlugin::new(
+        youtube.cookies_file.as_deref(),
+        youtube.oauth_client_id.as_deref(),
+        youtube.oauth_token_file.as_deref(),
+    ).await.map_err(|error| error.message)?;
     plugins.register(youtube_plugin);
     plugins.register(LavaSrcPlugin::default());
     plugins.register(LavaSearchPlugin::default());
@@ -353,6 +356,7 @@ async fn main() {
         ),
         playback_sources: PlaybackSourceStore::new(config.audio.max_decoded_cache_bytes),
         plugins: built_in_plugins(&config.plugins, &config.youtube, &config.plugin_directory)
+            .await
             .expect("failed to load configured plugins"),
         metrics_enabled: config.metrics.prometheus_enabled,
         player_update_interval: config.server.player_update_interval,
