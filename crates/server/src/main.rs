@@ -954,11 +954,11 @@ async fn update_player(
                         .unwrap_or(false)
                 ),
             );
-        let (track, stream_url, stream_headers) =
-            match resolve_player_track(&state, &fields).await {
-                Ok(resolved) => resolved,
-                Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
-            };
+        let (track, stream_url, stream_headers) = match resolve_player_track(&state, &fields).await
+        {
+            Ok(resolved) => resolved,
+            Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
+        };
         let audio_track = AudioTrack {
             identifier: track.info.identifier.clone(),
             title: track.info.title.clone(),
