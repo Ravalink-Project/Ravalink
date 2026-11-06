@@ -49,7 +49,9 @@ if [[ -z "${STARTUP:-}" ]]; then
     exit 64
 fi
 
-MODIFIED_STARTUP="$(printf '%s' "$STARTUP" | sed -E 's/\\{\\{([^}]+)\\}\\}/\${\\1}/g')"
+# Expand Pelican's {{VARIABLE}} placeholders without sed/regex escaping.
+MODIFIED_STARTUP="${STARTUP//\{\{/\$\{}"
+MODIFIED_STARTUP="${MODIFIED_STARTUP//\}\}/\}}"
 eval "MODIFIED_STARTUP=\"$MODIFIED_STARTUP\""
 
 echo ":/home/container$ $MODIFIED_STARTUP"
