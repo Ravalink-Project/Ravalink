@@ -221,6 +221,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn discovery_timeout_is_reported_when_discord_never_replies() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote = server.local_addr().unwrap();
+        let mut request = [0_u8; DISCOVERY_PACKET_BYTES];
+        let receive = tokio::spawn(async move {
+            server.recv_from(&mut request).await.unwrap();
+        });
+
+        let error = DiscordUdpTransport::discover(remote, 99, Duration::from_millis(20))
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("discovery timed out"));
+        receive.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn sends_eight_byte_udp_keepalive_nonce() {
         let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let remote = server.local_addr().unwrap();
