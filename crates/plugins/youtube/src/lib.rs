@@ -672,7 +672,7 @@ async fn authorize_device(
             .form(&[
                 ("client_id", client_id),
                 ("client_secret", client_secret),
-                ("code", device.device_code.as_str()),
+                ("device_code", device.device_code.as_str()),
                 ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ])
             .send()
