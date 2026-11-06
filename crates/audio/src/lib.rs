@@ -1825,6 +1825,61 @@ mod tests {
     }
 
     #[test]
+    fn native_player_rejects_zero_end_time_without_mutating_current_limit() {
+        let mut player = NativePlayer::default();
+        player
+            .start(AudioTrack {
+                identifier: "end-time".into(),
+                title: "End time".into(),
+                author: "Test".into(),
+                duration_ms: Some(10_000),
+                is_stream: false,
+            })
+            .unwrap();
+        player.set_end_time(Some(5_000)).unwrap();
+        assert!(player.set_end_time(Some(0)).is_err());
+        assert_eq!(player.end_time_ms, Some(5_000));
+    }
+
+    #[test]
+    fn replacing_a_track_resets_position_end_time_and_decoder_state() {
+        let mut player = NativePlayer::default();
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "first".into(),
+                    title: "First".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(20_000),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.1; 1_920], 2)],
+            )
+            .unwrap();
+        player.seek(4_000).unwrap();
+        player.set_end_time(Some(8_000)).unwrap();
+
+        player
+            .load_decoded_track(
+                AudioTrack {
+                    identifier: "replacement".into(),
+                    title: "Replacement".into(),
+                    author: "Test".into(),
+                    duration_ms: Some(30_000),
+                    is_stream: false,
+                },
+                vec![frame(vec![0.2; 1_920], 2)],
+            )
+            .unwrap();
+
+        assert_eq!(player.snapshot().track.unwrap().identifier, "replacement");
+        assert_eq!(player.snapshot().position_ms, 0);
+        assert_eq!(player.end_time_ms, None);
+        assert!(player.next_frame().unwrap().is_some());
+        assert!(player.next_frame().unwrap().is_none());
+    }
+
+    #[test]
     fn native_player_rejects_seeking_live_streams() {
         let mut player = NativePlayer::default();
         player
