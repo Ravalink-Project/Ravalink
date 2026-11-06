@@ -2096,7 +2096,9 @@ async fn add_trace_field(mut response: Response, include_trace: bool) -> Respons
     };
     object.insert("trace".into(), serde_json::Value::String(trace.to_string()));
     let body = Body::from(serde_json::to_vec(&payload).expect("JSON error payload serializes"));
-    Response::from_parts(parts, body)
+    let mut response = Response::from_parts(parts, body);
+    response.headers_mut().remove(header::CONTENT_LENGTH);
+    response
 }
 
 #[cfg(test)]
@@ -2160,11 +2162,12 @@ mod server_api_tests {
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(value.get("trace").is_none());
 
-        let with_trace = add_trace_field(
-            api_error(StatusCode::NOT_FOUND, "missing", "/v4/missing"),
-            true,
-        )
-        .await;
+        let mut original = api_error(StatusCode::NOT_FOUND, "missing", "/v4/missing");
+        original
+            .headers_mut()
+            .insert(header::CONTENT_LENGTH, HeaderValue::from_static("1"));
+        let with_trace = add_trace_field(original, true).await;
+        assert!(with_trace.headers().get(header::CONTENT_LENGTH).is_none());
         let body = to_bytes(with_trace.into_body(), usize::MAX).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(
