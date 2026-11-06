@@ -3330,13 +3330,21 @@ mod server_api_tests {
 
         let checks = [
             version(unauthorized.clone(), State(state())).await.status(),
-            info_endpoint(unauthorized.clone(), State(state())).await.status(),
+            info_endpoint(unauthorized.clone(), State(state()))
+                .await
+                .status(),
             stats(unauthorized.clone(), State(state())).await.status(),
-            routeplanner_status(unauthorized.clone(), State(state())).await.status(),
+            routeplanner_status(unauthorized.clone(), State(state()))
+                .await
+                .status(),
             version(forbidden.clone(), State(state())).await.status(),
-            info_endpoint(forbidden.clone(), State(state())).await.status(),
+            info_endpoint(forbidden.clone(), State(state()))
+                .await
+                .status(),
             stats(forbidden.clone(), State(state())).await.status(),
-            routeplanner_status(forbidden, State(state())).await.status(),
+            routeplanner_status(forbidden, State(state()))
+                .await
+                .status(),
         ];
 
         assert_eq!(
@@ -3355,7 +3363,8 @@ mod server_api_tests {
     }
 
     #[tokio::test]
-    async fn session_and_player_routes_distinguish_missing_session_invalid_guild_and_missing_player() {
+    async fn session_and_player_routes_distinguish_missing_session_invalid_guild_and_missing_player()
+    {
         let state = state();
         let missing_session = get_players(
             authorized_headers(),
@@ -3399,11 +3408,7 @@ mod server_api_tests {
         let session = state.sessions.create(123, None).await;
         state
             .players
-            .update(
-                &session.id,
-                "123456789",
-                serde_json::json!({"track": null}),
-            )
+            .update(&session.id, "123456789", serde_json::json!({"track": null}))
             .await;
 
         let response = delete_player(
