@@ -15,8 +15,8 @@ The reference Lavalink v4 handshake uses these headers:
 | Header Name     | Description                                     |
 |-----------------|-------------------------------------------------|
 | `Authorization` | The password you set in your Lavalink config    |
-| `User-Id`       | The user id of the bot                          |
-| `Client-Name`?  | The name of the client in `NAME/VERSION` format; recommended by RavaLink |
+| `User-Id`       | The non-zero user id of the bot                  |
+| `Client-Name`   | The name of the client in `NAME/VERSION` format |
 | `Session-Id`? * | The id of the previous session to resume        |
 
 **\*For more information on resuming see [Resuming](index.md#resuming)**
