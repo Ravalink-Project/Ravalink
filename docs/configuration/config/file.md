@@ -13,6 +13,9 @@ Start with [config/ravalink.example.toml](https://github.com/Ravalink-Project/Ra
 ## Complete example
 
 ```toml
+# Top-level plugin discovery path.
+plugin_directory = "plugins"
+
 [server]
 address = "0.0.0.0"
 port = 2333
@@ -41,23 +44,21 @@ max_active_decoded_pcm_bytes = 268435456
 prometheus_enabled = false
 prometheus_endpoint = "/metrics"
 
-plugin_directory = "plugins"
-
 # Optional external process plugin.
-# [[plugins]]
-# name = "community-source"
-# version = "1.0.0"
-# description = "Community source integration"
-# capabilities = ["track", "playlist", "search"]
-# identifier_prefix = "community:"
-# program = "/opt/ravalink/plugins/community-source"
-# args = ["--stdio"]
-#
-# [plugins.environment]
-# API_TOKEN = "inject-at-deployment-time"
-#
-# [plugins.config]
-# region = "eu"
+[[plugins]]
+name = "community-source"
+version = "1.0.0"
+description = "Community source integration"
+capabilities = ["track", "playlist", "search"]
+identifier_prefix = "community:"
+program = "/opt/ravalink/plugins/community-source"
+args = ["--stdio"]
+
+[plugins.environment]
+API_TOKEN = "inject-at-deployment-time"
+
+[plugins.config]
+region = "eu"
 ```
 
 ## Section reference
