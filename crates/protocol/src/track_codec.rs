@@ -350,28 +350,32 @@ mod tests {
     }
 
     #[test]
-    fn http_track_probe_payload_round_trips_with_source_metadata() {
-        let mut track = sample_track();
-        track.info.source_name = "http".into();
-        let encoded = encode_track_with_source_data(&track, Some("MPEG")).unwrap();
+    fn probing_source_payloads_round_trip_for_http_and_local_tracks() {
+        for source_name in ["http", "local"] {
+            let mut track = sample_track();
+            track.info.source_name = source_name.into();
+            let encoded = encode_track_with_source_data(&track, Some("MPEG")).unwrap();
 
-        let decoded = decode_track(&encoded).unwrap();
+            let decoded = decode_track(&encoded).unwrap();
 
-        assert_eq!(decoded.info.source_name, "http");
-        assert_eq!(decoded.info.identifier, track.info.identifier);
-        assert_eq!(decoded.info.title, track.info.title);
-        assert_eq!(decoded.info.uri, track.info.uri);
-        assert_eq!(decoded.info.position, track.info.position);
+            assert_eq!(decoded.info.source_name, source_name);
+            assert_eq!(decoded.info.identifier, track.info.identifier);
+            assert_eq!(decoded.info.title, track.info.title);
+            assert_eq!(decoded.info.uri, track.info.uri);
+            assert_eq!(decoded.info.position, track.info.position);
+        }
     }
 
     #[test]
-    fn http_track_requires_a_container_probe_payload() {
-        let mut track = sample_track();
-        track.info.source_name = "http".into();
+    fn probing_sources_require_a_container_probe_payload() {
+        for source_name in ["http", "local"] {
+            let mut track = sample_track();
+            track.info.source_name = source_name.into();
 
-        let error = encode_track(&track).unwrap_err();
+            let error = encode_track(&track).unwrap_err();
 
-        assert!(error.message.contains("container probe descriptor"));
+            assert!(error.message.contains("container probe descriptor"));
+        }
     }
 
     #[test]
