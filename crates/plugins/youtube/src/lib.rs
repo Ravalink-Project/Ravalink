@@ -11,8 +11,11 @@ use ravalink_plugin_api::{
 };
 use ravalink_protocol::{Track, TrackInfo, encode_track};
 use serde_json::json;
-use std::{path::Path, sync::Arc};
+use std::{path::{Path, PathBuf}, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 use ytdown::{MediaInfo, Ytdown, cookies::CookieJar};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 const MAX_SEARCH_RESULTS: usize = 50;
 const MAX_PLAYLIST_TRACKS: usize = 500;
@@ -20,7 +23,7 @@ const MAX_SEARCH_QUERY_BYTES: usize = 512;
 
 #[derive(Clone)]
 pub struct YouTubePlugin {
-    extractor: Arc<Ytdown>,
+    extractor: Arc<RwLock<Arc<Ytdown>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,33 +34,71 @@ pub struct YouTubeIdentifier {
 }
 
 impl YouTubePlugin {
-    /// Build the native extractor, optionally authenticating with a browser
-    /// Netscape cookies.txt export. ytdown derives SAPISIDHASH automatically.
-    pub fn new(cookies_file: Option<&Path>) -> Result<Self, PluginError> {
-        let builder = Ytdown::builder().user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
-        let builder = if let Some(path) = cookies_file {
-            let contents = std::fs::read_to_string(path).map_err(|error| {
-                PluginError::new(
-                    "youtube",
-                    format!(
-                        "cannot read YouTube cookies file {}: {error}",
-                        path.display()
-                    ),
-                )
-            })?;
-            let jar = CookieJar::parse_netscape(&contents).map_err(|error| {
-                PluginError::new("youtube", format!("invalid YouTube cookies file: {error}"))
-            })?;
-            builder.cookies(jar)
-        } else {
-            builder
+    /// Build the native extractor with optional browser cookies and Google OAuth.
+    /// OAuth uses Google's Device Authorization Grant and refreshes tokens in-process.
+    pub async fn new(
+        cookies_file: Option<&Path>,
+        oauth_client_id: Option<&str>,
+        oauth_token_file: Option<&Path>,
+    ) -> Result<Self, PluginError> {
+        let cookies_file = cookies_file.map(Path::to_path_buf);
+        let oauth = match (oauth_client_id, oauth_token_file) {
+            (Some(client_id), Some(token_file)) if !client_id.trim().is_empty() => {
+                let token = load_or_authorize(client_id, token_file).await?;
+                Some((client_id.to_owned(), token_file.to_path_buf(), token))
+            }
+            (None, None) => None,
+            _ => return Err(PluginError::new(
+                "youtube",
+                "youtube.oauth_client_id and youtube.oauth_token_file must be configured together",
+            )),
         };
-        let extractor = builder
-            .build()
-            .map_err(|error| PluginError::new("youtube", error.to_string()))?;
-        Ok(Self {
-            extractor: Arc::new(extractor),
-        })
+
+        let token = oauth.as_ref().map(|(_, _, token)| token.access_token.as_str());
+        let extractor = Arc::new(build_extractor(cookies_file.as_deref(), token)?);
+        let plugin = Self { extractor: Arc::new(RwLock::new(extractor)) };
+
+        if let Some((client_id, token_file, token)) = oauth {
+            let extractor_slot = plugin.extractor.clone();
+            tokio::spawn(async move {
+                let http = reqwest::Client::new();
+                let mut current = token;
+                loop {
+                    let now = unix_time();
+                    let refresh_at = current.created_at.saturating_add(current.expires_in.saturating_sub(90));
+                    tokio::time::sleep(Duration::from_secs(refresh_at.saturating_sub(now).max(1))).await;
+                    match refresh_access_token(&http, &client_id, &current.refresh_token).await {
+                        Ok(mut refreshed) => {
+                            if refreshed.refresh_token.is_empty() {
+                                refreshed.refresh_token = current.refresh_token.clone();
+                            }
+                            refreshed.created_at = unix_time();
+                            if let Err(error) = save_token(&token_file, &refreshed) {
+                                tracing::error!(%error, "failed to persist refreshed YouTube OAuth token");
+                                tokio::time::sleep(Duration::from_secs(30)).await;
+                                continue;
+                            }
+                            match build_extractor(cookies_file.as_deref(), Some(&refreshed.access_token)) {
+                                Ok(next) => {
+                                    *extractor_slot.write().await = Arc::new(next);
+                                    current = refreshed;
+                                    tracing::info!("YouTube OAuth access token refreshed");
+                                }
+                                Err(error) => {
+                                    tracing::error!(message = %error.message, "failed to rebuild YouTube extractor after OAuth refresh");
+                                    tokio::time::sleep(Duration::from_secs(30)).await;
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            tracing::error!(%error, "YouTube OAuth token refresh failed; retrying");
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                        }
+                    }
+                }
+            });
+        }
+        Ok(plugin)
     }
 
     pub fn parse_identifier(identifier: &str) -> Option<YouTubeIdentifier> {
@@ -121,8 +162,8 @@ impl YouTubePlugin {
 
     async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
-        let info = self
-            .extractor
+        let extractor = self.extractor.read().await.clone();
+        let info = extractor
             .resolve(&url)
             .await
             .map_err(|error| PluginError::new("youtube", error.to_string()))?;
@@ -164,8 +205,8 @@ impl YouTubePlugin {
     }
 
     async fn search(&self, query: &str) -> Result<PluginLoadResult, PluginError> {
-        let result = self
-            .extractor
+        let extractor = self.extractor.read().await.clone();
+        let result = extractor
             .resolve(&format!("ytsearch:{query}"))
             .await
             .map_err(|error| PluginError::new("youtube", error.to_string()))?;
@@ -195,8 +236,8 @@ impl YouTubePlugin {
 
     async fn load_playlist(&self, playlist_id: &str) -> Result<PluginLoadResult, PluginError> {
         let url = format!("https://www.youtube.com/playlist?list={playlist_id}");
-        let result = self
-            .extractor
+        let extractor = self.extractor.read().await.clone();
+        let result = extractor
             .resolve(&url)
             .await
             .map_err(|error| PluginError::new("youtube", error.to_string()))?;
@@ -401,6 +442,152 @@ fn track_from_entry_fields(
     track.encoded =
         encode_track(&track).map_err(|error| PluginError::new("youtube", error.message))?;
     Ok(track)
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OAuthToken {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: String,
+    #[serde(default = "default_bearer")]
+    token_type: String,
+    #[serde(default)]
+    expires_in: u64,
+    #[serde(default)]
+    created_at: u64,
+}
+fn default_bearer() -> String { "Bearer".into() }
+fn unix_time() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+}
+
+fn build_extractor(cookies_file: Option<&Path>, access_token: Option<&str>) -> Result<Ytdown, PluginError> {
+    let mut builder = Ytdown::builder().user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
+    if let Some(path) = cookies_file {
+        let contents = std::fs::read_to_string(path).map_err(|error| PluginError::new(
+            "youtube", format!("cannot read YouTube cookies file {}: {error}", path.display())
+        ))?;
+        let jar = CookieJar::parse_netscape(&contents).map_err(|error| {
+            PluginError::new("youtube", format!("invalid YouTube cookies file: {error}"))
+        })?;
+        builder = builder.cookies(jar);
+    }
+    if let Some(token) = access_token {
+        let mut headers = HeaderMap::new();
+        let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| {
+            PluginError::new("youtube", format!("invalid OAuth access token header: {error}"))
+        })?;
+        headers.insert(AUTHORIZATION, value);
+        let client = reqwest::Client::builder().default_headers(headers).build()
+            .map_err(|error| PluginError::new("youtube", format!("cannot build OAuth HTTP client: {error}")))?;
+        builder = builder.client(client);
+    }
+    builder.build().map_err(|error| PluginError::new("youtube", error.to_string()))
+}
+
+#[derive(Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_url: String,
+    #[serde(default)]
+    verification_url_complete: Option<String>,
+    #[serde(default = "default_poll_interval")]
+    interval: u64,
+    expires_in: u64,
+}
+fn default_poll_interval() -> u64 { 5 }
+
+#[derive(Deserialize)]
+struct OAuthErrorResponse { error: String }
+
+async fn load_or_authorize(client_id: &str, path: &Path) -> Result<OAuthToken, PluginError> {
+    if path.exists() {
+        let raw = std::fs::read_to_string(path).map_err(|error| PluginError::new(
+            "youtube", format!("cannot read OAuth token file {}: {error}", path.display())
+        ))?;
+        let token: OAuthToken = serde_json::from_str(&raw).map_err(|error| PluginError::new(
+            "youtube", format!("invalid OAuth token file {}: {error}", path.display())
+        ))?;
+        if !token.refresh_token.is_empty() {
+            return Ok(token);
+        }
+    }
+    authorize_device(client_id, path).await
+}
+
+async fn authorize_device(client_id: &str, token_path: &Path) -> Result<OAuthToken, PluginError> {
+    let http = reqwest::Client::new();
+    let device: DeviceCodeResponse = http.post("https://oauth2.googleapis.com/device/code")
+        .form(&[("client_id", client_id), ("scope", "https://www.googleapis.com/auth/youtube.readonly")])
+        .send().await.map_err(|error| PluginError::new("youtube", format!("OAuth device request failed: {error}")))?
+        .error_for_status().map_err(|error| PluginError::new("youtube", format!("OAuth device request rejected: {error}")))?
+        .json().await.map_err(|error| PluginError::new("youtube", format!("invalid OAuth device response: {error}")))?;
+    eprintln!("\n[RavaLink YouTube OAuth] Open {} and enter code {}{}\n",
+        device.verification_url, device.user_code,
+        device.verification_url_complete.as_deref().map(|url| format!(" (or visit {url})")).unwrap_or_default());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(device.expires_in);
+    let mut interval = device.interval.max(5);
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(PluginError::new("youtube", "Google OAuth device code expired; restart RavaLink to retry"));
+        }
+        tokio::time::sleep(Duration::from_secs(interval)).await;
+        let response = http.post("https://oauth2.googleapis.com/token")
+            .form(&[
+                ("client_id", client_id),
+                ("device_code", device.device_code.as_str()),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ])
+            .send().await.map_err(|error| PluginError::new("youtube", format!("OAuth token polling failed: {error}")))?;
+        if response.status().is_success() {
+            let mut token: OAuthToken = response.json().await.map_err(|error| PluginError::new("youtube", format!("invalid OAuth token response: {error}")))?;
+            token.created_at = unix_time();
+            save_token(token_path, &token)?;
+            return Ok(token);
+        }
+        let error: OAuthErrorResponse = response.json().await.unwrap_or(OAuthErrorResponse { error: "unknown_error".into() });
+        match error.error.as_str() {
+            "authorization_pending" => continue,
+            "slow_down" => { interval = interval.saturating_add(5); }
+            "access_denied" => return Err(PluginError::new("youtube", "Google OAuth authorization was denied")),
+            "expired_token" => return Err(PluginError::new("youtube", "Google OAuth device code expired; restart RavaLink to retry")),
+            other => return Err(PluginError::new("youtube", format!("Google OAuth failed: {other}"))),
+        }
+    }
+}
+
+async fn refresh_access_token(http: &reqwest::Client, client_id: &str, refresh_token: &str) -> Result<OAuthToken, String> {
+    let response = http.post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("client_id", client_id),
+            ("refresh_token", refresh_token),
+            ("grant_type", "refresh_token"),
+        ])
+        .send().await.map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Google returned {status}: {body}"));
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
+fn save_token(path: &Path, token: &OAuthToken) -> Result<(), PluginError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| PluginError::new("youtube", format!("cannot create OAuth token directory: {error}")))?;
+    }
+    let data = serde_json::to_vec_pretty(token).map_err(|error| PluginError::new("youtube", format!("cannot serialize OAuth token: {error}")))?;
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, data).map_err(|error| PluginError::new("youtube", format!("cannot write OAuth token file: {error}")))?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| PluginError::new("youtube", format!("cannot secure OAuth token file: {error}")))?;
+    }
+    std::fs::rename(&temporary, path).map_err(|error| PluginError::new("youtube", format!("cannot install OAuth token file: {error}")))?;
+    Ok(())
 }
 
 fn parse_timestamp(value: &str) -> Option<u64> {
