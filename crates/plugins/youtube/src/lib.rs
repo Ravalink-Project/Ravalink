@@ -1,33 +1,31 @@
 //! Native YouTube source plugin.
 //!
-//! The default extractor uses an Invidious-compatible API. Configure one or
-//! more comma-separated instance URLs with RAVALINK_YOUTUBE_API_BASE for failover.
+//! Extraction is performed in-process through YouTube InnerTube. No public
+//! Invidious/Piped instance, external downloader process, Node.js or Python
+//! runtime is required. YouTube itself remains the upstream media provider.
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use ravalink_plugin_api::{
     PluginDescriptor, PluginError, PluginLoadResult, PluginLoadType, RavaLinkPlugin,
 };
 use ravalink_protocol::{Track, TrackInfo, encode_track};
-use serde_json::{Value, json};
-use std::time::Duration;
+use serde_json::json;
+use std::sync::Arc;
+use ytdown::{MediaInfo, Ytdown};
 
-const MAX_PROVIDER_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 50;
 const MAX_PLAYLIST_TRACKS: usize = 500;
 const MAX_SEARCH_QUERY_BYTES: usize = 512;
 
 #[derive(Clone)]
 pub struct YouTubePlugin {
-    client: reqwest::Client,
-    api_bases: Vec<String>,
+    extractor: Arc<Ytdown>,
 }
 
 impl Default for YouTubePlugin {
     fn default() -> Self {
-        Self::new(
-            std::env::var("RAVALINK_YOUTUBE_API_BASE")
-                .unwrap_or_else(|_| "https://inv.nadeko.net".to_owned()),
-        )
+        Self::new()
     }
 }
 
@@ -39,28 +37,14 @@ pub struct YouTubeIdentifier {
 }
 
 impl YouTubePlugin {
-    pub fn new(api_base: impl Into<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .user_agent(format!(
-                "RavaLink/{} (native YouTube source)",
-                env!("CARGO_PKG_VERSION")
-            ))
+    pub fn new() -> Self {
+        let extractor = Ytdown::builder()
+            .user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")))
             .build()
-            .expect("valid default HTTP client");
-        let api_base = api_base.into();
-        let api_bases = api_base
-            .split(',')
-            .map(str::trim)
-            .filter(|base| !base.is_empty())
-            .map(|base| base.trim_end_matches('/').to_owned())
-            .collect::<Vec<_>>();
-        let api_bases = if api_bases.is_empty() {
-            vec!["https://inv.nadeko.net".to_owned()]
-        } else {
-            api_bases
-        };
-        Self { client, api_bases }
+            .expect("the embedded YouTube extractor HTTP client must build");
+        Self {
+            extractor: Arc::new(extractor),
+        }
     }
 
     pub fn parse_identifier(identifier: &str) -> Option<YouTubeIdentifier> {
@@ -122,117 +106,72 @@ impl YouTubePlugin {
             .filter(|query| !query.is_empty() && query.len() <= MAX_SEARCH_QUERY_BYTES)
     }
 
-    async fn request_json(&self, path: &str) -> Result<Value, PluginError> {
-        let mut failures = Vec::new();
-        for api_base in &self.api_bases {
-            let url = format!("{api_base}{path}");
-            let mut response = match self.client.get(&url).send().await {
-                Ok(response) => match response.error_for_status() {
-                    Ok(response) => response,
-                    Err(error) => {
-                        failures.push(format!("{api_base}: HTTP request failed: {error}"));
-                        continue;
-                    }
-                },
-                Err(error) => {
-                    failures.push(format!("{api_base}: request failed: {error}"));
-                    continue;
-                }
-            };
-            if response
-                .content_length()
-                .is_some_and(|length| length > MAX_PROVIDER_RESPONSE_BYTES as u64)
-            {
-                failures.push(format!(
-                    "{api_base}: response exceeds the {MAX_PROVIDER_RESPONSE_BYTES}-byte limit"
-                ));
-                continue;
-            }
-            let mut body = Vec::new();
-            loop {
-                match response.chunk().await {
-                    Ok(Some(chunk)) => {
-                        if body.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
-                            failures.push(format!(
-                                "{api_base}: response exceeds the {MAX_PROVIDER_RESPONSE_BYTES}-byte limit"
-                            ));
-                            body.clear();
-                            break;
-                        }
-                        body.extend_from_slice(&chunk);
-                    }
-                    Ok(None) => break,
-                    Err(error) => {
-                        failures.push(format!("{api_base}: cannot read response: {error}"));
-                        body.clear();
-                        break;
-                    }
-                }
-            }
-            if body.is_empty() {
-                continue;
-            }
-            match serde_json::from_slice(&body) {
-                Ok(data) => return Ok(data),
-                Err(error) => failures.push(format!("{api_base}: invalid JSON response: {error}")),
-            }
-        }
-        if failures.is_empty() {
+    async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
+        let url = format!("https://www.youtube.com/watch?v={video_id}");
+        let info = self
+            .extractor
+            .resolve(&url)
+            .await
+            .map_err(|error| PluginError::new("youtube", error.to_string()))?;
+        let MediaInfo::Single(video) = info else {
             return Err(PluginError::new(
                 "youtube",
-                "no Invidious API base URL is configured",
+                "YouTube returned a collection where a single video was expected",
+            ));
+        };
+
+        let format = video
+            .formats()
+            .best_audio()
+            .or_else(|_| video.formats().best_progressive())
+            .map_err(|error| {
+                PluginError::new(
+                    "youtube",
+                    format!("no playable audio format was returned: {error}"),
+                )
+            })?;
+        if format.url.is_empty() {
+            return Err(PluginError::new(
+                "youtube",
+                "YouTube returned an empty audio stream URL",
             ));
         }
-        Err(PluginError::new(
-            "youtube",
-            format!(
-                "all configured Invidious API instances failed: {}",
-                failures.join("; ")
-            ),
-        ))
-    }
 
-    async fn load_video(&self, video_id: &str) -> Result<Track, PluginError> {
-        let data = self
-            .request_json(&format!("/api/v1/videos/{video_id}"))
-            .await?;
-        let mut track = track_from_video(&data)?;
-        let stream_url = data
-            .get("adaptiveFormats")
-            .and_then(Value::as_array)
-            .and_then(|formats| select_audio_format(formats))
-            .and_then(|format| format.get("url").and_then(Value::as_str))
-            .ok_or_else(|| PluginError::new("youtube", "no playable audio format was returned"))?;
+        let mut track = track_from_video(&video)?;
         track.plugin_info = json!({
-            "streamUrl": stream_url,
-            "provider": "invidious",
+            "streamUrl": format.url,
+            "provider": "youtube-innertube",
+            "format": format.itag,
+            "mimeType": format.mime_type,
+            "httpHeaders": format.http_headers,
         });
         Ok(track)
     }
 
-    pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, PluginError> {
-        let result = self.search(query).await?;
-        serde_json::from_value(result.data)
-            .map_err(|error| PluginError::new("youtube", format!("invalid search tracks: {error}")))
-    }
-
-    pub async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
-        self.load_video(video_id).await
-    }
-
     async fn search(&self, query: &str) -> Result<PluginLoadResult, PluginError> {
-        let encoded_query = url_encode(query);
-        let data = self
-            .request_json(&format!("/api/v1/search?q={encoded_query}&type=video"))
-            .await?;
-        let items = data
-            .as_array()
-            .ok_or_else(|| PluginError::new("youtube", "search response is not an array"))?;
-        let tracks = items
-            .iter()
-            .take(MAX_SEARCH_RESULTS)
-            .filter_map(|item| track_from_video(item).ok())
-            .collect::<Vec<_>>();
+        let result = self
+            .extractor
+            .resolve(&format!("ytsearch:{query}"))
+            .await
+            .map_err(|error| PluginError::new("youtube", error.to_string()))?;
+        let MediaInfo::Collection(mut collection) = result else {
+            return Err(PluginError::new(
+                "youtube",
+                "YouTube search did not return a result collection",
+            ));
+        };
+
+        let mut tracks = Vec::with_capacity(MAX_SEARCH_RESULTS);
+        while tracks.len() < MAX_SEARCH_RESULTS {
+            let Some(entry) = collection.entries.next().await else {
+                break;
+            };
+            let entry = entry.map_err(|error| PluginError::new("youtube", error.to_string()))?;
+            if let Ok(track) = track_from_entry(&entry) {
+                tracks.push(track);
+            }
+        }
+
         Ok(PluginLoadResult::new(
             PluginLoadType::Search,
             serde_json::to_value(tracks).expect("track list serializes"),
@@ -240,22 +179,31 @@ impl YouTubePlugin {
     }
 
     async fn load_playlist(&self, playlist_id: &str) -> Result<PluginLoadResult, PluginError> {
-        let data = self
-            .request_json(&format!("/api/v1/playlists/{playlist_id}"))
-            .await?;
-        let videos = data
-            .get("videos")
-            .and_then(Value::as_array)
-            .ok_or_else(|| PluginError::new("youtube", "playlist response has no videos"))?;
-        let tracks = videos
-            .iter()
-            .take(MAX_PLAYLIST_TRACKS)
-            .filter_map(|video| track_from_video(video).ok())
-            .collect::<Vec<_>>();
-        let name = data
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("YouTube playlist");
+        let url = format!("https://www.youtube.com/playlist?list={playlist_id}");
+        let result = self
+            .extractor
+            .resolve(&url)
+            .await
+            .map_err(|error| PluginError::new("youtube", error.to_string()))?;
+        let MediaInfo::Collection(mut collection) = result else {
+            return Err(PluginError::new(
+                "youtube",
+                "YouTube playlist did not return a result collection",
+            ));
+        };
+
+        let name = collection.title.unwrap_or_else(|| "YouTube playlist".to_owned());
+        let mut tracks = Vec::with_capacity(MAX_PLAYLIST_TRACKS);
+        while tracks.len() < MAX_PLAYLIST_TRACKS {
+            let Some(entry) = collection.entries.next().await else {
+                break;
+            };
+            let entry = entry.map_err(|error| PluginError::new("youtube", error.to_string()))?;
+            if let Ok(track) = track_from_entry(&entry) {
+                tracks.push(track);
+            }
+        }
+
         Ok(PluginLoadResult::new(
             PluginLoadType::Playlist,
             json!({
@@ -272,7 +220,7 @@ impl RavaLinkPlugin for YouTubePlugin {
         PluginDescriptor {
             name: "youtube".into(),
             version: env!("CARGO_PKG_VERSION").into(),
-            description: "YouTube video, playlist and search source".into(),
+            description: "Native YouTube InnerTube video, playlist and search source".into(),
             capabilities: vec![
                 "video".into(),
                 "playlist".into(),
@@ -290,15 +238,19 @@ impl RavaLinkPlugin for YouTubePlugin {
         if let Some(query) = Self::search_query(identifier) {
             return self.search(query).await.map(Some);
         }
+
         let parsed = Self::parse_identifier(identifier)
             .ok_or_else(|| PluginError::new("youtube", "invalid YouTube identifier"))?;
+
+        // A watch URL with a playlist parameter is handled as a playlist so
+        // Lavalink's selectedTrack semantics remain intact.
         if let Some(playlist_id) = parsed.playlist_id {
             let mut result = self.load_playlist(&playlist_id).await?;
             if let Some(video_id) = parsed.video_id {
                 let tracks = result
                     .data
                     .get_mut("tracks")
-                    .and_then(Value::as_array_mut)
+                    .and_then(serde_json::Value::as_array_mut)
                     .ok_or_else(|| {
                         PluginError::new("youtube", "playlist response has no tracks")
                     })?;
@@ -306,7 +258,7 @@ impl RavaLinkPlugin for YouTubePlugin {
                     track
                         .get("info")
                         .and_then(|info| info.get("identifier"))
-                        .and_then(Value::as_str)
+                        .and_then(serde_json::Value::as_str)
                         == Some(video_id.as_str())
                 });
                 if let Some(index) = selected {
@@ -329,8 +281,9 @@ impl RavaLinkPlugin for YouTubePlugin {
             }
             return Ok(Some(result));
         }
+
         if let Some(video_id) = parsed.video_id {
-            let mut track = self.load_video(&video_id).await?;
+            let mut track = self.resolve_video(&video_id).await?;
             if let Some(start_seconds) = parsed.start_seconds {
                 track.info.position = start_seconds.saturating_mul(1_000);
                 track.encoded = encode_track(&track)
@@ -341,70 +294,60 @@ impl RavaLinkPlugin for YouTubePlugin {
                 serde_json::to_value(track).expect("track serializes"),
             )));
         }
+
         Ok(None)
     }
 }
 
-fn select_audio_format(formats: &[Value]) -> Option<&Value> {
-    formats
-        .iter()
-        .filter(|format| {
-            format
-                .get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|mime| mime.starts_with("audio/"))
-        })
-        .max_by_key(|format| {
-            let mime = format
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let prefer_streamable_opus = mime.starts_with("audio/webm") || mime.contains("opus");
-            let bitrate = format
-                .get("bitrate")
-                .and_then(Value::as_u64)
-                .unwrap_or_default();
-            (prefer_streamable_opus, bitrate)
-        })
-}
-
-fn track_from_video(video: &Value) -> Result<Track, PluginError> {
-    let video_id = video
-        .get("videoId")
-        .and_then(Value::as_str)
-        .filter(|id| valid_video_id(id))
-        .ok_or_else(|| PluginError::new("youtube", "video result has no valid videoId"))?;
-    let title = video
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("Unknown title");
-    let author = video
-        .get("author")
-        .and_then(Value::as_str)
-        .unwrap_or("Unknown");
+fn track_from_video(video: &ytdown::VideoInfo) -> Result<Track, PluginError> {
+    let artwork_url = video.thumbnails.last().map(|thumbnail| thumbnail.url.clone());
     let length = video
-        .get("lengthSeconds")
-        .and_then(Value::as_i64)
-        .unwrap_or_default()
-        .saturating_mul(1_000);
-    let artwork_url = video
-        .get("videoThumbnails")
-        .and_then(Value::as_array)
-        .and_then(|thumbnails| thumbnails.last())
-        .and_then(|thumbnail| thumbnail.get("url"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+        .duration
+        .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or_default();
     let mut track = Track {
         encoded: String::new(),
         info: TrackInfo {
-            identifier: video_id.to_owned(),
+            identifier: video.id.clone(),
+            is_seekable: !video.is_live,
+            author: video.uploader.clone().unwrap_or_else(|| "Unknown".to_owned()),
+            length,
+            is_stream: video.is_live,
+            position: 0,
+            title: video.title.clone(),
+            uri: Some(video.webpage_url.clone()),
+            source_name: "youtube".to_owned(),
+            artwork_url,
+            isrc: None,
+        },
+        plugin_info: json!({}),
+        user_data: json!({}),
+    };
+    track.encoded =
+        encode_track(&track).map_err(|error| PluginError::new("youtube", error.message))?;
+    Ok(track)
+}
+
+fn track_from_entry(entry: &ytdown::Entry) -> Result<Track, PluginError> {
+    if !valid_video_id(&entry.id) {
+        return Err(PluginError::new("youtube", "search result has an invalid video ID"));
+    }
+    let length = entry
+        .duration
+        .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or_default();
+    let artwork_url = entry.thumbnails.last().map(|thumbnail| thumbnail.url.clone());
+    let mut track = Track {
+        encoded: String::new(),
+        info: TrackInfo {
+            identifier: entry.id.clone(),
             is_seekable: true,
-            author: author.to_owned(),
+            author: "Unknown".to_owned(),
             length,
             is_stream: false,
             position: 0,
-            title: title.to_owned(),
-            uri: Some(format!("https://www.youtube.com/watch?v={video_id}")),
+            title: entry.title.clone().unwrap_or_else(|| "Unknown title".to_owned()),
+            uri: Some(entry.url.clone()),
             source_name: "youtube".to_owned(),
             artwork_url,
             isrc: None,
@@ -506,159 +449,9 @@ fn parse_url(value: &str) -> Option<ParsedUrl<'_>> {
     Some(ParsedUrl { host, path, query })
 }
 
-fn url_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-                (byte as char).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    async fn mock_api_response(status: &'static str, body: &'static str) -> String {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0_u8; 4_096];
-            let _ = stream.read(&mut request).await;
-            let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).await.unwrap();
-        });
-        format!("http://{address}")
-    }
-
-    #[tokio::test]
-    async fn resolves_search_results_from_a_provider_response() {
-        let base = mock_api_response("200 OK", "[]").await;
-        let plugin = YouTubePlugin::new(base);
-
-        let result = plugin
-            .load_tracks("ytsearch:ambient music")
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(result.load_type, PluginLoadType::Search);
-        assert_eq!(result.data, json!([]));
-    }
-
-    #[tokio::test]
-    async fn rejects_malformed_provider_json() {
-        let base = mock_api_response("200 OK", "{not-json").await;
-        let plugin = YouTubePlugin::new(base);
-
-        let error = plugin
-            .request_json("/api/v1/search?q=broken")
-            .await
-            .unwrap_err();
-
-        assert!(error.message.contains("invalid JSON response"));
-    }
-
-    #[tokio::test]
-    async fn fails_over_when_a_provider_instance_is_unavailable() {
-        let unavailable =
-            mock_api_response("503 Service Unavailable", "upstream unavailable").await;
-        let healthy = mock_api_response("200 OK", "[]").await;
-        let plugin = YouTubePlugin::new(format!("{unavailable},{healthy}"));
-
-        let result = plugin
-            .load_tracks("ytsearch:ambient music")
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(result.load_type, PluginLoadType::Search);
-        assert_eq!(result.data, json!([]));
-    }
-
-    #[tokio::test]
-    async fn resolves_video_metadata_and_a_playable_audio_url() {
-        let base = mock_api_response(
-            "200 OK",
-            r#"{
-                "videoId": "dQw4w9WgXcQ",
-                "title": "Example track",
-                "author": "Example artist",
-                "lengthSeconds": 210,
-                "adaptiveFormats": [{
-                    "type": "audio/webm; codecs=opus",
-                    "bitrate": 160000,
-                    "url": "https://media.example/audio.webm"
-                }]
-            }"#,
-        )
-        .await;
-        let plugin = YouTubePlugin::new(base);
-
-        let track = plugin.resolve_video("dQw4w9WgXcQ").await.unwrap();
-
-        assert_eq!(track.info.title, "Example track");
-        assert_eq!(track.info.author, "Example artist");
-        assert_eq!(track.info.length, 210_000);
-        assert_eq!(
-            track.plugin_info["streamUrl"],
-            "https://media.example/audio.webm"
-        );
-        assert!(!track.encoded.is_empty());
-    }
-
-    #[tokio::test]
-    async fn rejects_provider_tracks_without_a_playable_audio_format() {
-        let base = mock_api_response(
-            "200 OK",
-            r#"{"videoId":"dQw4w9WgXcQ","title":"Example","adaptiveFormats":[]}"#,
-        )
-        .await;
-        let plugin = YouTubePlugin::new(base);
-
-        let error = plugin.resolve_video("dQw4w9WgXcQ").await.unwrap_err();
-
-        assert!(error.message.contains("no playable audio format"));
-    }
-
-    #[test]
-    fn accepts_a_comma_separated_invidious_failover_list() {
-        let plugin = YouTubePlugin::new(
-            "https://first.example/, https://second.example, ,https://third.example/",
-        );
-        assert_eq!(
-            plugin.api_bases,
-            vec![
-                "https://first.example".to_owned(),
-                "https://second.example".to_owned(),
-                "https://third.example".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn rejects_malformed_playlist_ids_and_oversized_search_queries() {
-        assert!(
-            YouTubePlugin::parse_identifier(
-                "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=bad%2Fid"
-            )
-            .unwrap()
-            .playlist_id
-            .is_none()
-        );
-        let oversized = format!("ytsearch:{}", "x".repeat(MAX_SEARCH_QUERY_BYTES + 1));
-        assert!(YouTubePlugin::search_query(&oversized).is_none());
-    }
 
     #[test]
     fn parses_standard_short_and_shorts_urls() {
@@ -723,31 +516,20 @@ mod tests {
     fn rejects_non_youtube_and_malformed_video_ids() {
         assert!(YouTubePlugin::parse_identifier("https://example.com/watch?v=123").is_none());
         assert!(YouTubePlugin::parse_identifier("https://youtube.com/watch?v=short").is_none());
+        let oversized = format!("ytsearch:{}", "x".repeat(MAX_SEARCH_QUERY_BYTES + 1));
+        assert!(YouTubePlugin::search_query(&oversized).is_none());
     }
 
     #[test]
-    fn prefers_streamable_opus_audio_when_multiple_codecs_are_available() {
-        let formats = vec![
-            json!({"type": "audio/webm; codecs=opus", "bitrate": 160_000, "url": "https://cdn.test/opus"}),
-            json!({"type": "audio/mp4; codecs=mp4a.40.2", "bitrate": 96_000, "url": "https://cdn.test/aac"}),
-        ];
-        assert_eq!(
-            select_audio_format(&formats)
-                .and_then(|format| format.get("url"))
-                .and_then(Value::as_str),
-            Some("https://cdn.test/opus")
-        );
-    }
-
-    #[test]
-    fn creates_lavalink_track_metadata_from_video_json() {
-        let track = track_from_video(&json!({
-            "videoId": "dQw4w9WgXcQ",
-            "title": "Example",
-            "author": "Artist",
-            "lengthSeconds": 210
-        }))
-        .unwrap();
+    fn creates_lavalink_track_metadata_from_video_entry() {
+        let entry = ytdown::Entry {
+            id: "dQw4w9WgXcQ".into(),
+            title: Some("Example".into()),
+            url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ".into(),
+            duration: Some(std::time::Duration::from_secs(210)),
+            thumbnails: Vec::new(),
+        };
+        let track = track_from_entry(&entry).unwrap();
         assert_eq!(track.info.source_name, "youtube");
         assert_eq!(track.info.length, 210_000);
         assert!(!track.encoded.is_empty());
