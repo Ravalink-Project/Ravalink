@@ -505,7 +505,10 @@ fn build_extractor(
     if let Some(token) = access_token {
         let mut headers = HeaderMap::new();
         let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| {
-            PluginError::new("youtube", format!("invalid OAuth access token header: {error}"))
+            PluginError::new(
+                "youtube",
+                format!("invalid OAuth access token header: {error}"),
+            )
         })?;
         headers.insert(AUTHORIZATION, value);
         let client = reqwest::Client::builder()
