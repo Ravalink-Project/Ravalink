@@ -511,7 +511,19 @@ async fn load_or_authorize(client_id: &str, path: &Path) -> Result<OAuthToken, P
             "youtube", format!("invalid OAuth token file {}: {error}", path.display())
         ))?;
         if !token.refresh_token.is_empty() {
-            return Ok(token);
+            if token.created_at.saturating_add(token.expires_in) > unix_time().saturating_add(90) {
+                return Ok(token);
+            }
+            let http = reqwest::Client::new();
+            let mut refreshed = refresh_access_token(&http, client_id, &token.refresh_token)
+                .await
+                .map_err(|error| PluginError::new("youtube", format!("cannot refresh stored OAuth token: {error}")))?;
+            if refreshed.refresh_token.is_empty() {
+                refreshed.refresh_token = token.refresh_token;
+            }
+            refreshed.created_at = unix_time();
+            save_token(path, &refreshed)?;
+            return Ok(refreshed);
         }
     }
     authorize_device(client_id, path).await
