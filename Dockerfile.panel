@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Official RavaLink runtime image for Pelican and Pterodactyl.
-FROM --platform=$TARGETOS/$TARGETARCH ghcr.io/pterodactyl/yolks:debian
+FROM --platform=$TARGETOS/$TARGETARCH debian:trixie-slim
 
 ARG TARGETARCH
 ARG RAVALINK_VERSION
@@ -11,6 +11,14 @@ LABEL org.opencontainers.image.source="https://github.com/Ravalink-Project/Raval
 LABEL org.opencontainers.image.licenses="MIT"
 
 USER root
+
+# Debian Trixie ships a newer glibc than the Debian yolk currently used by
+# many panels. The official release binaries are linked against GLIBC 2.39.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 container \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash container
 
 RUN set -eux; \
     test -n "${RAVALINK_VERSION}"; \
