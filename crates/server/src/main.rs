@@ -293,8 +293,8 @@ fn built_in_plugins(
     plugin_directory: &std::path::Path,
 ) -> Result<PluginRegistry, String> {
     let mut plugins = PluginRegistry::default();
-    let youtube_plugin = YouTubePlugin::new(youtube.cookies_file.as_deref())
-        .map_err(|error| error.message)?;
+    let youtube_plugin =
+        YouTubePlugin::new(youtube.cookies_file.as_deref()).map_err(|error| error.message)?;
     plugins.register(youtube_plugin);
     plugins.register(LavaSrcPlugin::default());
     plugins.register(LavaSearchPlugin::default());
