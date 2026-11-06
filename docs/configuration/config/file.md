@@ -20,6 +20,7 @@ The file contains sections for:
 - server address, port, authentication password and player update interval
 - logging verbosity
 - audio buffering, Opus quality and memory limits
+- YouTube extraction and optional browser-cookie authentication
 - optional Prometheus metrics
 - native plugin discovery and external plugin declarations
 
