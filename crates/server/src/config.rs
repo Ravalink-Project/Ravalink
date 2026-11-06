@@ -120,6 +120,10 @@ impl Default for AudioConfig {
 pub struct YouTubeConfig {
     /// Netscape-format browser cookies.txt. Treat this file as a password.
     pub cookies_file: Option<PathBuf>,
+    /// Google OAuth client ID (use an OAuth client configured for TVs and limited-input devices).
+    pub oauth_client_id: Option<String>,
+    /// File used to persist the OAuth refresh token; protect it like a password.
+    pub oauth_token_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -206,6 +210,17 @@ impl Config {
         }
         if let Ok(value) = env::var("RAVALINK_PLUGINS_DIRECTORY") {
             config.plugin_directory = PathBuf::from(value);
+        }
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_CLIENT_ID") {
+            let value = value.trim();
+            config.youtube.oauth_client_id = if value.is_empty() { None } else { Some(value.to_owned()) };
+        }
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE") {
+            let value = value.trim();
+            config.youtube.oauth_token_file = if value.is_empty() { None } else { Some(PathBuf::from(value)) };
+        }
+        if config.youtube.oauth_client_id.is_some() != config.youtube.oauth_token_file.is_some() {
+            return Err("youtube.oauth_client_id and youtube.oauth_token_file must be configured together".to_owned());
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_COOKIES_FILE") {
             let value = value.trim();
@@ -383,6 +398,8 @@ mod tests {
         );
         let default: Config = toml::from_str("").unwrap();
         assert_eq!(default.youtube.cookies_file, None);
+        assert_eq!(default.youtube.oauth_client_id, None);
+        assert_eq!(default.youtube.oauth_token_file, None);
     }
 
     #[test]
