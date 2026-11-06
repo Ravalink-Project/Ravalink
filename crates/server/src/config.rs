@@ -369,6 +369,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn youtube_cookie_file_is_configurable_in_toml() {
+        let config: Config = toml::from_str(
+            r#"
+                [youtube]
+                cookies_file = "/run/secrets/youtube-cookies.txt"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.youtube.cookies_file,
+            Some(PathBuf::from("/run/secrets/youtube-cookies.txt"))
+        );
+        let default: Config = toml::from_str("").unwrap();
+        assert_eq!(default.youtube.cookies_file, None);
+    }
+
+    #[test]
     fn audio_source_memory_limits_are_configurable_in_toml() {
         let config: Config = toml::from_str(
             r#"
