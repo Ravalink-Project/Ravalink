@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# Official RavaLink runtime image for Pelican and Pterodactyl.
+FROM --platform=$TARGETOS/$TARGETARCH ghcr.io/pterodactyl/yolks:debian
+
+ARG TARGETARCH
+ARG RAVALINK_VERSION
+
+LABEL org.opencontainers.image.title="RavaLink"
+LABEL org.opencontainers.image.description="Native Rust Lavalink-compatible audio server for Pelican and Pterodactyl"
+LABEL org.opencontainers.image.source="https://github.com/Ravalink-Project/Ravalink"
+LABEL org.opencontainers.image.licenses="MIT"
+
+USER root
+
+RUN set -eux; \
+    test -n "${RAVALINK_VERSION}"; \
+    case "${TARGETARCH}" in \
+      amd64) asset="ravalink-linux-x86_64" ;; \
+      arm64) asset="ravalink-linux-aarch64" ;; \
+      *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    base="https://github.com/Ravalink-Project/Ravalink/releases/download/${RAVALINK_VERSION}"; \
+    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 "${base}/SHA256SUMS" -o /tmp/SHA256SUMS; \
+    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 "${base}/${asset}" -o /tmp/ravalink; \
+    expected="$(awk -v name="${asset}" '($2 == name || $2 == ("*" name)) { print $1; exit }' /tmp/SHA256SUMS)"; \
+    test -n "$expected"; \
+    printf '%s  %s\n' "$expected" /tmp/ravalink | sha256sum --check --status; \
+    install -m 0755 /tmp/ravalink /usr/local/bin/ravalink; \
+    rm -f /tmp/ravalink /tmp/SHA256SUMS
+
+ENV USER=container HOME=/home/container
+WORKDIR /home/container
+USER container
+
+EXPOSE 2333/tcp
