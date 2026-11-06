@@ -2280,7 +2280,7 @@ mod server_api_tests {
     }
 
     #[tokio::test]
-    async fn websocket_handshake_supports_optional_client_name_and_session_resume() {
+    async fn websocket_handshake_requires_client_name_and_supports_session_resume() {
         use futures_util::StreamExt;
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 

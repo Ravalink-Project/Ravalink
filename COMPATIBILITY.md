@@ -8,7 +8,8 @@ This file is the acceptance ledger for the native rewrite. A route marked
 | Authentication | Authorization header on REST and WebSocket | Initial implementation |
 | Version | GET /version | Initial implementation |
 | Server info | GET /v4/info with Lavalink v4 field names | Initial implementation; advertises implemented DSP filters |
-| REST errors | Lavalink error response shape and optional `trace=true` stack trace | Standard error fields are implemented; the optional `trace` query parameter and trace field are not implemented yet |\n| Statistics | GET /v4/stats | System and process CPU loads are measured through sysinfo; node stats are cached for five seconds; frame stats are omitted when unavailable |
+| REST errors | Lavalink error response shape and optional `trace=true` stack trace | Standard error fields are implemented; the optional `trace` query parameter and trace field are not implemented yet |
+| Statistics | GET /v4/stats | System and process CPU loads are measured through sysinfo; node stats are cached for five seconds; frame stats are omitted when unavailable |
 | Load tracks | GET /v4/loadtracks | Direct HTTP(S) files plus built-in YouTube, Spotify, Apple Music and Deezer resolution/search; YouTube audio matching supplies playable streams for protected catalog providers; direct HTTP(S) sources and plugin stream URLs are opened at player start and decoded progressively through bounded queues; generic URL duration is unknown |
 | Decode track | GET /v4/decodetrack | Lavaplayer track-info v1-v3 decoding; known built-in source payloads supported |
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
