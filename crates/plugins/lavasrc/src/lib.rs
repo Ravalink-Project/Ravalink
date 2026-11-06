@@ -9,7 +9,7 @@ use ravalink_plugin_api::{
     PluginDescriptor, PluginError, PluginLoadResult, PluginLoadType, RavaLinkPlugin,
 };
 use ravalink_plugin_youtube::YouTubePlugin;
-use ravalink_protocol::{Track, TrackInfo, encode_track};
+use ravalink_protocol::{Track, encode_track};
 use serde_json::{Value, json};
 use std::{
     collections::HashSet,
@@ -1069,6 +1069,7 @@ fn split_url(value: &str) -> Option<ParsedUrl<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ravalink_protocol::TrackInfo;
 
     #[derive(Clone)]
     struct MockYouTubeResolver {
