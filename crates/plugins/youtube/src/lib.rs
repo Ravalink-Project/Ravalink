@@ -19,7 +19,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::RwLock;
-use ytdown::{MediaInfo, Ytdown, cookies::CookieJar, extractor::youtube::YoutubeExtractor};
+use ytdown::{MediaInfo, Ytdown, cookies::CookieJar};
 
 const MAX_SEARCH_RESULTS: usize = 50;
 const MAX_PLAYLIST_TRACKS: usize = 500;
@@ -63,7 +63,7 @@ impl YouTubePlugin {
         let token = oauth
             .as_ref()
             .map(|(_, _, token)| token.access_token.as_str());
-        let extractor = Arc::new(build_extractor(cookies_file.as_deref(), token, None)?);
+        let extractor = Arc::new(build_extractor(cookies_file.as_deref(), token)?);
         let plugin = Self {
             extractor: Arc::new(RwLock::new(extractor)),
         };
@@ -94,7 +94,6 @@ impl YouTubePlugin {
                             match build_extractor(
                                 cookies_file.as_deref(),
                                 Some(&refreshed.access_token),
-                                None,
                             ) {
                                 Ok(next) => {
                                     *extractor_slot.write().await = Arc::new(next);
@@ -467,23 +466,11 @@ fn track_from_entry_fields(
 
 impl Default for YouTubePlugin {
     fn default() -> Self {
-        let extractor = build_extractor(None, None, None)
+        let extractor = build_extractor(None, None)
             .expect("the native YouTube extractor must build with default settings");
         Self {
             extractor: Arc::new(RwLock::new(Arc::new(extractor))),
         }
-    }
-}
-
-impl YouTubePlugin {
-    /// Build an unauthenticated extractor against a custom YouTube API origin.
-    /// Intended for deterministic integration tests and alternate compatible origins.
-    pub fn with_api_base(api_base: impl Into<String>) -> Result<Self, PluginError> {
-        let api_base = api_base.into();
-        let extractor = build_extractor(None, None, Some(&api_base))?;
-        Ok(Self {
-            extractor: Arc::new(RwLock::new(Arc::new(extractor))),
-        })
     }
 }
 
@@ -512,14 +499,8 @@ fn unix_time() -> u64 {
 fn build_extractor(
     cookies_file: Option<&Path>,
     access_token: Option<&str>,
-    api_base: Option<&str>,
 ) -> Result<Ytdown, PluginError> {
     let mut builder = Ytdown::builder().user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
-    if let Some(api_base) = api_base {
-        builder = builder
-            .clear_extractors()
-            .extractor(Box::new(YoutubeExtractor::with_base_url(api_base)));
-    }
     if let Some(path) = cookies_file {
         let contents = std::fs::read_to_string(path).map_err(|error| {
             PluginError::new(
