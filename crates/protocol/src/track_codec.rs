@@ -409,6 +409,29 @@ mod tests {
     }
 
     #[test]
+    fn decodes_a_real_lavaplayer_v3_track_fixture() {
+        // Captured from the TrackStartEvent compatibility fixture in
+        // twilight-rs/twilight at f3bf23257ffb799c28c7a885a2dc4acc2e449e83.
+        let encoded = "QAAAzgMAMUJsZWVkIEl0IE91dCBbT2ZmaWNpYWwgTXVzaWMgVmlkZW9dIC0gTGlua2luIFBhcmsAC0xpbmtpbiBQYXJrAAAAAAAClCgAC09udXVZY3FoekNFAAEAK2h0dHBzOi8vd3d3LnlvdXR1YmUuY29tL3dhdGNoP3Y9T251dVljcWh6Q0UBADRodHRwczovL2kueXRpbWcuY29tL3ZpL09udXVZY3FoekNFL21heHJlc2RlZmF1bHQuanBnAAAHeW91dHViZQAAAAAAAAAA";
+        let track = decode_track(encoded).unwrap();
+
+        assert_eq!(track.info.title, "Bleed It Out [Official Music Video] - Linkin Park");
+        assert_eq!(track.info.author, "Linkin Park");
+        assert_eq!(track.info.length, 169_000);
+        assert_eq!(track.info.identifier, "OnuuYcqhzCE");
+        assert_eq!(
+            track.info.uri.as_deref(),
+            Some("https://www.youtube.com/watch?v=OnuuYcqhzCE")
+        );
+        assert_eq!(
+            track.info.artwork_url.as_deref(),
+            Some("https://i.ytimg.com/vi/OnuuYcqhzCE/maxresdefault.jpg")
+        );
+        assert_eq!(track.info.source_name, "youtube");
+        assert_eq!(track.info.position, 0);
+    }
+
+    #[test]
     fn native_music_provider_sources_round_trip_without_extra_payloads() {
         for source_name in ["spotify", "applemusic", "deezer"] {
             let mut track = sample_track();
