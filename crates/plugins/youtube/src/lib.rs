@@ -43,15 +43,18 @@ impl YouTubePlugin {
     pub async fn new(
         cookies_file: Option<&Path>,
         oauth_client_id: Option<&str>,
+        oauth_client_secret: Option<&str>,
         oauth_token_file: Option<&Path>,
     ) -> Result<Self, PluginError> {
         let cookies_file = cookies_file.map(Path::to_path_buf);
-        let oauth = match (oauth_client_id, oauth_token_file) {
-            (Some(client_id), Some(token_file)) if !client_id.trim().is_empty() => {
-                let token = load_or_authorize(client_id, token_file).await?;
-                Some((client_id.to_owned(), token_file.to_path_buf(), token))
+        let oauth = match (oauth_client_id, oauth_client_secret, oauth_token_file) {
+            (Some(client_id), Some(client_secret), Some(token_file))
+                if !client_id.trim().is_empty() && !client_secret.trim().is_empty() =>
+            {
+                let token = load_or_authorize(client_id, client_secret, token_file).await?;
+                Some((client_id.to_owned(), client_secret.to_owned(), token_file.to_path_buf(), token))
             }
-            (None, None) => None,
+            (None, None, None) => None,
             _ => {
                 return Err(PluginError::new(
                     "youtube",
@@ -62,13 +65,13 @@ impl YouTubePlugin {
 
         let token = oauth
             .as_ref()
-            .map(|(_, _, token)| token.access_token.as_str());
+            .map(|(_, _, _, token)| token.access_token.as_str());
         let extractor = Arc::new(build_extractor(cookies_file.as_deref(), token)?);
         let plugin = Self {
             extractor: Arc::new(RwLock::new(extractor)),
         };
 
-        if let Some((client_id, token_file, token)) = oauth {
+        if let Some((client_id, client_secret, token_file, token)) = oauth {
             let extractor_slot = plugin.extractor.clone();
             tokio::spawn(async move {
                 let http = reqwest::Client::new();
@@ -80,7 +83,7 @@ impl YouTubePlugin {
                         .saturating_add(current.expires_in.saturating_sub(90));
                     tokio::time::sleep(Duration::from_secs(refresh_at.saturating_sub(now).max(1)))
                         .await;
-                    match refresh_access_token(&http, &client_id, &current.refresh_token).await {
+                    match refresh_access_token(&http, &client_id, &client_secret, &current.refresh_token).await {
                         Ok(mut refreshed) => {
                             if refreshed.refresh_token.is_empty() {
                                 refreshed.refresh_token = current.refresh_token.clone();
@@ -562,7 +565,7 @@ struct OAuthErrorResponse {
     error: String,
 }
 
-async fn load_or_authorize(client_id: &str, path: &Path) -> Result<OAuthToken, PluginError> {
+async fn load_or_authorize(client_id: &str, client_secret: &str, path: &Path) -> Result<OAuthToken, PluginError> {
     if path.exists() {
         let raw = std::fs::read_to_string(path).map_err(|error| {
             PluginError::new(
@@ -581,7 +584,7 @@ async fn load_or_authorize(client_id: &str, path: &Path) -> Result<OAuthToken, P
                 return Ok(token);
             }
             let http = reqwest::Client::new();
-            let mut refreshed = refresh_access_token(&http, client_id, &token.refresh_token)
+            let mut refreshed = refresh_access_token(&http, client_id, client_secret, &token.refresh_token)
                 .await
                 .map_err(|error| {
                     PluginError::new(
@@ -597,10 +600,10 @@ async fn load_or_authorize(client_id: &str, path: &Path) -> Result<OAuthToken, P
             return Ok(refreshed);
         }
     }
-    authorize_device(client_id, path).await
+    authorize_device(client_id, client_secret, path).await
 }
 
-async fn authorize_device(client_id: &str, token_path: &Path) -> Result<OAuthToken, PluginError> {
+async fn authorize_device(client_id: &str, client_secret: &str, token_path: &Path) -> Result<OAuthToken, PluginError> {
     let http = reqwest::Client::new();
     let device: DeviceCodeResponse = http
         .post("https://oauth2.googleapis.com/device/code")
@@ -646,7 +649,8 @@ async fn authorize_device(client_id: &str, token_path: &Path) -> Result<OAuthTok
             .post("https://oauth2.googleapis.com/token")
             .form(&[
                 ("client_id", client_id),
-                ("device_code", device.device_code.as_str()),
+                ("client_secret", client_secret),
+                ("code", device.device_code.as_str()),
                 ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ])
             .send()
@@ -695,12 +699,14 @@ async fn authorize_device(client_id: &str, token_path: &Path) -> Result<OAuthTok
 async fn refresh_access_token(
     http: &reqwest::Client,
     client_id: &str,
+    client_secret: &str,
     refresh_token: &str,
 ) -> Result<OAuthToken, String> {
     let response = http
         .post("https://oauth2.googleapis.com/token")
         .form(&[
             ("client_id", client_id),
+            ("client_secret", client_secret),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token"),
         ])
