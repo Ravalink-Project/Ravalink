@@ -600,9 +600,10 @@ async fn load_or_authorize(
                 return Ok(token);
             }
             let http = reqwest::Client::new();
-            let mut refreshed = refresh_access_token(&http, client_id, client_secret, &token.refresh_token)
-                .await
-                .map_err(|error| {
+            let mut refreshed =
+                refresh_access_token(&http, client_id, client_secret, &token.refresh_token)
+                    .await
+                    .map_err(|error| {
                     PluginError::new(
                         "youtube",
                         format!("cannot refresh stored OAuth token: {error}"),
