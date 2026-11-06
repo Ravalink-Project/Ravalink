@@ -508,11 +508,20 @@ fn build_extractor(
             PluginError::new("youtube", format!("invalid OAuth access token header: {error}"))
         })?;
         headers.insert(AUTHORIZATION, value);
-        let client = reqwest::Client::builder().default_headers(headers).build()
-            .map_err(|error| PluginError::new("youtube", format!("cannot build OAuth HTTP client: {error}")))?;
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .map_err(|error| {
+                PluginError::new(
+                    "youtube",
+                    format!("cannot build OAuth HTTP client: {error}"),
+                )
+            })?;
         builder = builder.client(client);
     }
-    builder.build().map_err(|error| PluginError::new("youtube", error.to_string()))
+    builder
+        .build()
+        .map_err(|error| PluginError::new("youtube", error.to_string()))
 }
 
 #[derive(Deserialize)]
