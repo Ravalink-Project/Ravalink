@@ -87,7 +87,10 @@ jobs:
           merge-multiple: true
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum ravalink-linux-* > SHA256SUMS
+        run: |
+          sha256sum ravalink-linux-* > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 2
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
