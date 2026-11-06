@@ -3363,8 +3363,7 @@ mod server_api_tests {
     }
 
     #[tokio::test]
-    async fn session_and_player_routes_distinguish_missing_session_invalid_guild_and_missing_player()
-    {
+    async fn session_player_routes_validate_error_statuses() {
         let state = state();
         let missing_session = get_players(
             authorized_headers(),
@@ -3420,5 +3419,4 @@ mod server_api_tests {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert!(state.players.get(&session.id, "123456789").await.is_none());
     }
-
 }
