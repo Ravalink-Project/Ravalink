@@ -19,7 +19,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::RwLock;
-use ytdown::{MediaInfo, Ytdown, cookies::CookieJar};
+use ytdown::{MediaInfo, Ytdown, cookies::CookieJar, extractor::youtube::YoutubeExtractor};
 
 const MAX_SEARCH_RESULTS: usize = 50;
 const MAX_PLAYLIST_TRACKS: usize = 500;
@@ -63,7 +63,7 @@ impl YouTubePlugin {
         let token = oauth
             .as_ref()
             .map(|(_, _, token)| token.access_token.as_str());
-        let extractor = Arc::new(build_extractor(cookies_file.as_deref(), token)?);
+        let extractor = Arc::new(build_extractor(cookies_file.as_deref(), token, None)?);
         let plugin = Self {
             extractor: Arc::new(RwLock::new(extractor)),
         };
@@ -94,6 +94,7 @@ impl YouTubePlugin {
                             match build_extractor(
                                 cookies_file.as_deref(),
                                 Some(&refreshed.access_token),
+                                None,
                             ) {
                                 Ok(next) => {
                                     *extractor_slot.write().await = Arc::new(next);
@@ -176,7 +177,7 @@ impl YouTubePlugin {
             .filter(|query| !query.is_empty() && query.len() <= MAX_SEARCH_QUERY_BYTES)
     }
 
-    async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
+    pub async fn resolve_video(&self, video_id: &str) -> Result<Track, PluginError> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
         let extractor = self.extractor.read().await.clone();
         let info = extractor
@@ -220,7 +221,7 @@ impl YouTubePlugin {
         Ok(track)
     }
 
-    async fn search(&self, query: &str) -> Result<PluginLoadResult, PluginError> {
+    pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, PluginError> {
         let extractor = self.extractor.read().await.clone();
         let result = extractor
             .resolve(&format!("ytsearch:{query}"))
@@ -243,7 +244,11 @@ impl YouTubePlugin {
                 tracks.push(track);
             }
         }
+        Ok(tracks)
+    }
 
+    async fn search(&self, query: &str) -> Result<PluginLoadResult, PluginError> {
+        let tracks = self.search_tracks(query).await?;
         Ok(PluginLoadResult::new(
             PluginLoadType::Search,
             serde_json::to_value(tracks).expect("track list serializes"),
@@ -460,6 +465,28 @@ fn track_from_entry_fields(
     Ok(track)
 }
 
+impl Default for YouTubePlugin {
+    fn default() -> Self {
+        let extractor = build_extractor(None, None, None)
+            .expect("the native YouTube extractor must build with default settings");
+        Self {
+            extractor: Arc::new(RwLock::new(Arc::new(extractor))),
+        }
+    }
+}
+
+impl YouTubePlugin {
+    /// Build an unauthenticated extractor against a custom YouTube API origin.
+    /// Intended for deterministic integration tests and alternate compatible origins.
+    pub fn with_api_base(api_base: impl Into<String>) -> Result<Self, PluginError> {
+        let api_base = api_base.into();
+        let extractor = build_extractor(None, None, Some(&api_base))?;
+        Ok(Self {
+            extractor: Arc::new(RwLock::new(Arc::new(extractor))),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OAuthToken {
     access_token: String,
@@ -485,8 +512,14 @@ fn unix_time() -> u64 {
 fn build_extractor(
     cookies_file: Option<&Path>,
     access_token: Option<&str>,
+    api_base: Option<&str>,
 ) -> Result<Ytdown, PluginError> {
     let mut builder = Ytdown::builder().user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")));
+    if let Some(api_base) = api_base {
+        builder = builder
+            .clear_extractors()
+            .extractor(Box::new(YoutubeExtractor::with_base_url(api_base)));
+    }
     if let Some(path) = cookies_file {
         let contents = std::fs::read_to_string(path).map_err(|error| {
             PluginError::new(
