@@ -192,7 +192,9 @@ impl YouTubePlugin {
             ));
         };
 
-        let name = collection.title.unwrap_or_else(|| "YouTube playlist".to_owned());
+        let name = collection
+            .title
+            .unwrap_or_else(|| "YouTube playlist".to_owned());
         let mut tracks = Vec::with_capacity(MAX_PLAYLIST_TRACKS);
         while tracks.len() < MAX_PLAYLIST_TRACKS {
             let Some(entry) = collection.entries.next().await else {
@@ -300,7 +302,10 @@ impl RavaLinkPlugin for YouTubePlugin {
 }
 
 fn track_from_video(video: &ytdown::VideoInfo) -> Result<Track, PluginError> {
-    let artwork_url = video.thumbnails.last().map(|thumbnail| thumbnail.url.clone());
+    let artwork_url = video
+        .thumbnails
+        .last()
+        .map(|thumbnail| thumbnail.url.clone());
     let length = video
         .duration
         .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
@@ -310,7 +315,10 @@ fn track_from_video(video: &ytdown::VideoInfo) -> Result<Track, PluginError> {
         info: TrackInfo {
             identifier: video.id.clone(),
             is_seekable: !video.is_live,
-            author: video.uploader.clone().unwrap_or_else(|| "Unknown".to_owned()),
+            author: video
+                .uploader
+                .clone()
+                .unwrap_or_else(|| "Unknown".to_owned()),
             length,
             is_stream: video.is_live,
             position: 0,
@@ -334,7 +342,10 @@ fn track_from_entry(entry: &ytdown::Entry) -> Result<Track, PluginError> {
         entry.title.as_deref().unwrap_or("Unknown title"),
         &entry.url,
         entry.duration,
-        entry.thumbnails.last().map(|thumbnail| thumbnail.url.clone()),
+        entry
+            .thumbnails
+            .last()
+            .map(|thumbnail| thumbnail.url.clone()),
     )
 }
 
@@ -346,7 +357,10 @@ fn track_from_entry_fields(
     artwork_url: Option<String>,
 ) -> Result<Track, PluginError> {
     if !valid_video_id(id) {
-        return Err(PluginError::new("youtube", "search result has an invalid video ID"));
+        return Err(PluginError::new(
+            "youtube",
+            "search result has an invalid video ID",
+        ));
     }
     let length = duration
         .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
