@@ -10,8 +10,8 @@ performed during the RC cycle.
 - [x] The current master commit passes rustfmt, the full workspace test suite,
       and Clippy with warnings denied.
 - [x] Linux x86_64 and ARM64 optimized builds and API smoke tests pass.
-- [ ] Ubuntu, macOS and Windows workspace tests pass.
-- [ ] The Docker image builds successfully.
+- [x] Ubuntu, macOS and Windows workspace tests pass.
+- [x] The Docker image builds successfully.
 - [x] REST route, request, response, status-code and error contracts are covered
       by automated tests against the supported Lavalink v4 behavior.
 - [x] WebSocket handshake, session resume, player updates, event payloads,
