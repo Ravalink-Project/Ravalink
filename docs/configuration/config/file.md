@@ -20,7 +20,7 @@ The file contains sections for:
 - server address, port, authentication password and player update interval
 - logging verbosity
 - audio buffering, Opus quality and memory limits
-- YouTube extraction, optional browser cookies and Google OAuth Device Flow authentication
+- YouTube extraction, optional browser cookies and Google OAuth Device Flow authentication (client ID, client secret and token file)
 - optional Prometheus metrics
 - native plugin discovery and external plugin declarations
 
