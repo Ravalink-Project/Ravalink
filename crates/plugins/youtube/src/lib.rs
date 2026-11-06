@@ -145,6 +145,8 @@ impl YouTubePlugin {
             "mimeType": format.mime_type,
             "httpHeaders": format.http_headers,
         });
+        track.encoded =
+            encode_track(&track).map_err(|error| PluginError::new("youtube", error.message))?;
         Ok(track)
     }
 
