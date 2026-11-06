@@ -329,25 +329,39 @@ fn track_from_video(video: &ytdown::VideoInfo) -> Result<Track, PluginError> {
 }
 
 fn track_from_entry(entry: &ytdown::Entry) -> Result<Track, PluginError> {
-    if !valid_video_id(&entry.id) {
+    track_from_entry_fields(
+        &entry.id,
+        entry.title.as_deref().unwrap_or("Unknown title"),
+        &entry.url,
+        entry.duration,
+        entry.thumbnails.last().map(|thumbnail| thumbnail.url.clone()),
+    )
+}
+
+fn track_from_entry_fields(
+    id: &str,
+    title: &str,
+    url: &str,
+    duration: Option<std::time::Duration>,
+    artwork_url: Option<String>,
+) -> Result<Track, PluginError> {
+    if !valid_video_id(id) {
         return Err(PluginError::new("youtube", "search result has an invalid video ID"));
     }
-    let length = entry
-        .duration
+    let length = duration
         .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
         .unwrap_or_default();
-    let artwork_url = entry.thumbnails.last().map(|thumbnail| thumbnail.url.clone());
     let mut track = Track {
         encoded: String::new(),
         info: TrackInfo {
-            identifier: entry.id.clone(),
+            identifier: id.to_owned(),
             is_seekable: true,
             author: "Unknown".to_owned(),
             length,
             is_stream: false,
             position: 0,
-            title: entry.title.clone().unwrap_or_else(|| "Unknown title".to_owned()),
-            uri: Some(entry.url.clone()),
+            title: title.to_owned(),
+            uri: Some(url.to_owned()),
             source_name: "youtube".to_owned(),
             artwork_url,
             isrc: None,
@@ -522,14 +536,14 @@ mod tests {
 
     #[test]
     fn creates_lavalink_track_metadata_from_video_entry() {
-        let entry = ytdown::Entry {
-            id: "dQw4w9WgXcQ".into(),
-            title: Some("Example".into()),
-            url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ".into(),
-            duration: Some(std::time::Duration::from_secs(210)),
-            thumbnails: Vec::new(),
-        };
-        let track = track_from_entry(&entry).unwrap();
+        let track = track_from_entry_fields(
+            "dQw4w9WgXcQ",
+            "Example",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            Some(std::time::Duration::from_secs(210)),
+            None,
+        )
+        .unwrap();
         assert_eq!(track.info.source_name, "youtube");
         assert_eq!(track.info.length, 210_000);
         assert!(!track.encoded.is_empty());
