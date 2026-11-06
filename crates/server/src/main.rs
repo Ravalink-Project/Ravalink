@@ -2083,6 +2083,24 @@ mod server_api_tests {
         headers
     }
 
+    #[tokio::test]
+    async fn api_errors_match_lavalink_error_response_shape() {
+        let response = api_error(
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            "/v4/sessions/missing",
+        );
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value["timestamp"].as_u64().is_some());
+        assert_eq!(value["status"], 404);
+        assert_eq!(value["error"], "Not Found");
+        assert_eq!(value["message"], "Session not found");
+        assert_eq!(value["path"], "/v4/sessions/missing");
+    }
+
     #[test]
     fn player_update_no_replace_query_accepts_case_insensitive_booleans() {
         assert_eq!(parse_query_bool("true"), Some(true));
