@@ -213,14 +213,25 @@ impl Config {
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_CLIENT_ID") {
             let value = value.trim();
-            config.youtube.oauth_client_id = if value.is_empty() { None } else { Some(value.to_owned()) };
+            config.youtube.oauth_client_id = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_owned())
+            };
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE") {
             let value = value.trim();
-            config.youtube.oauth_token_file = if value.is_empty() { None } else { Some(PathBuf::from(value)) };
+            config.youtube.oauth_token_file = if value.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(value))
+            };
         }
         if config.youtube.oauth_client_id.is_some() != config.youtube.oauth_token_file.is_some() {
-            return Err("youtube.oauth_client_id and youtube.oauth_token_file must be configured together".to_owned());
+            return Err(
+                "youtube.oauth_client_id and youtube.oauth_token_file must be configured together"
+                    .to_owned(),
+            );
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_COOKIES_FILE") {
             let value = value.trim();
