@@ -332,21 +332,11 @@ mod tests {
     }
 
     #[test]
-    fn decodes_lavaplayer_v1_track_without_version_marker() {
-        let mut payload = Vec::new();
-        write_utf(&mut payload, "Legacy track").unwrap();
-        write_utf(&mut payload, "Legacy artist").unwrap();
-        payload.extend_from_slice(&123_000_i64.to_be_bytes());
-        write_utf(&mut payload, "legacy-track-id").unwrap();
-        payload.push(0);
-        write_utf(&mut payload, "youtube").unwrap();
-        payload.extend_from_slice(&5_000_u64.to_be_bytes());
-
-        let mut message = (payload.len() as u32).to_be_bytes().to_vec();
-        message.extend_from_slice(&payload);
-        let encoded = STANDARD.encode(message);
-
-        let decoded = decode_track(&encoded).unwrap();
+    fn decodes_a_legacy_v1_wire_fixture_without_a_version_marker() {
+        // Fixed minimal fixture for the original unversioned Lavaplayer layout.
+        // This is a protocol-layout fixture, not a captured provider track.
+        let encoded = "AAAASAAMTGVnYWN5IHRyYWNrAA1MZWdhY3kgYXJ0aXN0AAAAAAAB4HgAD2xlZ2FjeS10cmFjay1pZAAAB3lvdXR1YmUAAAAAAAATiA==";
+        let decoded = decode_track(encoded).unwrap();
 
         assert_eq!(decoded.info.title, "Legacy track");
         assert_eq!(decoded.info.author, "Legacy artist");
