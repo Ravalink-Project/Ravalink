@@ -15,7 +15,7 @@ USER root
 # Debian Trixie ships a newer glibc than the Debian yolk currently used by
 # many panels. The official release binaries are linked against GLIBC 2.39.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl passwd \
+    && apt-get install -y --no-install-recommends ca-certificates curl passwd tini \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 container \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash container
@@ -36,8 +36,32 @@ RUN set -eux; \
     install -m 0755 /tmp/ravalink /usr/local/bin/ravalink; \
     rm -f /tmp/ravalink /tmp/SHA256SUMS
 
+# Pelican/Wings expects a yolk-style entrypoint to expand STARTUP and
+# keep the server process attached to the container console.
+RUN cat > /entrypoint.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/container
+
+if [[ -z "${STARTUP:-}" ]]; then
+    echo "[RavaLink] ERROR: STARTUP is empty; refusing to leave an idle container." >&2
+    exit 64
+fi
+
+MODIFIED_STARTUP="$(printf '%s' "$STARTUP" | sed -E 's/\\{\\{([^}]+)\\}\\}/\${\\1}/g')"
+eval "MODIFIED_STARTUP=\"$MODIFIED_STARTUP\""
+
+echo ":/home/container$ $MODIFIED_STARTUP"
+exec bash -lc "$MODIFIED_STARTUP"
+EOF
+RUN chmod 0755 /entrypoint.sh
+
 ENV USER=container HOME=/home/container
 WORKDIR /home/container
 USER container
+
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["/entrypoint.sh"]
 
 EXPOSE 2333/tcp
