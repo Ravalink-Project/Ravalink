@@ -954,7 +954,7 @@ async fn update_player(
                         .unwrap_or(false)
                 ),
             );
-        let (track, stream_url) = match resolve_player_track(&state, &fields).await {
+        let (track, stream_url, stream_headers) = match resolve_player_track(&state, &fields).await {
             Ok(resolved) => resolved,
             Err(error) => return api_error(StatusCode::BAD_REQUEST, &error, &path),
         };
@@ -990,8 +990,9 @@ async fn update_player(
         let http_sources = state.http_sources.clone();
         tokio::spawn(async move {
             if let Err(error) = http_sources
-                .stream_to_channel(
+                .stream_to_channel_with_headers(
                     &stream_url,
+                    &stream_headers,
                     4 * 1024 * 1024,
                     initial_position_ms,
                     pcm_sender,
@@ -1671,11 +1672,11 @@ async fn seek_player_source(
 async fn resolve_player_track(
     state: &AppState,
     fields: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(Track, String), String> {
+) -> Result<(Track, String, Vec<(String, String)>), String> {
     let nested_track = fields.get("track").filter(|track| track.is_object());
     let identifier = requested_track_identifier(fields);
     if let Some(identifier) = identifier {
-        let (mut track, stream_url) = if state.plugins.find(identifier).is_some() {
+        let (mut track, stream_url, stream_headers) = if state.plugins.find(identifier).is_some() {
             resolve_plugin_audio_track(state, identifier).await?
         } else {
             let resolved = state
@@ -1683,13 +1684,13 @@ async fn resolve_player_track(
                 .resolve_stream_track(identifier)
                 .await
                 .map_err(|error| error.message)?;
-            (resolved.track, identifier.to_owned())
+            (resolved.track, identifier.to_owned(), Vec::new())
         };
         if let Some(user_data) = nested_track.and_then(|track| track.get("userData")) {
             track.user_data = user_data.clone();
             track.encoded = encode_track(&track).map_err(|error| error.message)?;
         }
-        return Ok((track, stream_url));
+        return Ok((track, stream_url, stream_headers));
     }
 
     let encoded = fields
@@ -1717,10 +1718,10 @@ async fn resolve_player_track(
             .uri
             .clone()
             .ok_or_else(|| "plugin track has no source URI".to_owned())?;
-        let (mut plugin_track, stream_url) = resolve_plugin_audio_track(state, &uri).await?;
+        let (mut plugin_track, stream_url, stream_headers) = resolve_plugin_audio_track(state, &uri).await?;
         plugin_track.info.position = position;
         plugin_track.encoded = encode_track(&plugin_track).map_err(|error| error.message)?;
-        return Ok((plugin_track, stream_url));
+        return Ok((plugin_track, stream_url, stream_headers));
     }
     if track.info.source_name != "http" {
         return Err(format!(
@@ -1742,13 +1743,13 @@ async fn resolve_player_track(
     track = resolved.track;
     track.user_data = user_data;
     track.encoded = encode_track(&track).map_err(|error| error.message)?;
-    Ok((track, uri))
+    Ok((track, uri, Vec::new()))
 }
 
 async fn resolve_plugin_audio_track(
     state: &AppState,
     identifier: &str,
-) -> Result<(Track, String), String> {
+) -> Result<(Track, String, Vec<(String, String)>), String> {
     let result = state
         .plugins
         .load_tracks(identifier)
@@ -1766,10 +1767,27 @@ async fn resolve_plugin_audio_track(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| "native plugin returned no playable audio URL".to_owned())?
         .to_owned();
+    let stream_headers = track
+        .plugin_info
+        .get("httpHeaders")
+        .and_then(serde_json::Value::as_array)
+        .map(|headers| {
+            headers
+                .iter()
+                .filter_map(|header| {
+                    let values = header.as_array()?;
+                    Some((
+                        values.first()?.as_str()?.to_owned(),
+                        values.get(1)?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     track.info.is_stream = true;
     track.info.is_seekable = false;
     track.encoded = encode_track(&track).map_err(|error| error.message)?;
-    Ok((track, stream_url))
+    Ok((track, stream_url, stream_headers))
 }
 
 async fn decode_track_endpoint(
