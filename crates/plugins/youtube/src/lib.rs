@@ -512,6 +512,7 @@ fn build_extractor(
         })?;
         headers.insert(AUTHORIZATION, value);
         let client = reqwest::Client::builder()
+            .user_agent(concat!("RavaLink/", env!("CARGO_PKG_VERSION")))
             .default_headers(headers)
             .build()
             .map_err(|error| {
