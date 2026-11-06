@@ -52,7 +52,12 @@ impl YouTubePlugin {
                 if !client_id.trim().is_empty() && !client_secret.trim().is_empty() =>
             {
                 let token = load_or_authorize(client_id, client_secret, token_file).await?;
-                Some((\n                    client_id.to_owned(),\n                    client_secret.to_owned(),\n                    token_file.to_path_buf(),\n                    token,\n                ))
+                Some((
+                    client_id.to_owned(),
+                    client_secret.to_owned(),
+                    token_file.to_path_buf(),
+                    token,
+                ))
             }
             (None, None, None) => None,
             _ => {
@@ -83,7 +88,14 @@ impl YouTubePlugin {
                         .saturating_add(current.expires_in.saturating_sub(90));
                     tokio::time::sleep(Duration::from_secs(refresh_at.saturating_sub(now).max(1)))
                         .await;
-                    match refresh_access_token(\n                        &http,\n                        &client_id,\n                        &client_secret,\n                        &current.refresh_token,\n                    )\n                    .await\n                    {
+                    match refresh_access_token(
+                        &http,
+                        &client_id,
+                        &client_secret,
+                        &current.refresh_token,
+                    )
+                    .await
+                    {
                         Ok(mut refreshed) => {
                             if refreshed.refresh_token.is_empty() {
                                 refreshed.refresh_token = current.refresh_token.clone();
@@ -565,7 +577,11 @@ struct OAuthErrorResponse {
     error: String,
 }
 
-async fn load_or_authorize(\n    client_id: &str,\n    client_secret: &str,\n    path: &Path,\n) -> Result<OAuthToken, PluginError> {
+async fn load_or_authorize(
+    client_id: &str,
+    client_secret: &str,
+    path: &Path,
+) -> Result<OAuthToken, PluginError> {
     if path.exists() {
         let raw = std::fs::read_to_string(path).map_err(|error| {
             PluginError::new(
@@ -603,7 +619,11 @@ async fn load_or_authorize(\n    client_id: &str,\n    client_secret: &str,\n   
     authorize_device(client_id, client_secret, path).await
 }
 
-async fn authorize_device(\n    client_id: &str,\n    client_secret: &str,\n    token_path: &Path,\n) -> Result<OAuthToken, PluginError> {
+async fn authorize_device(
+    client_id: &str,
+    client_secret: &str,
+    token_path: &Path,
+) -> Result<OAuthToken, PluginError> {
     let http = reqwest::Client::new();
     let device: DeviceCodeResponse = http
         .post("https://oauth2.googleapis.com/device/code")
@@ -626,7 +646,9 @@ async fn authorize_device(\n    client_id: &str,\n    client_secret: &str,\n    
             PluginError::new("youtube", format!("invalid OAuth device response: {error}"))
         })?;
     eprintln!(
-        "\n[RavaLink YouTube OAuth] Open {} and enter code {}{}\n",
+        "
+[RavaLink YouTube OAuth] Open {} and enter code {}{}
+",
         device.verification_url,
         device.user_code,
         device
