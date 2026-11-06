@@ -3195,6 +3195,41 @@ mod server_api_tests {
         assert_eq!(stuck["type"], "TrackStuckEvent");
         assert_eq!(stuck["track"]["encoded"], encoded);
         assert_eq!(stuck["thresholdMs"], 10_000);
+
+        publish_track_exception(
+            &state,
+            "session",
+            "123456",
+            encoded.clone(),
+            "decoder failed",
+            "AudioDecodeError",
+        );
+        let (_, exception) = receiver.try_recv().unwrap();
+        let exception = serde_json::to_value(exception).unwrap();
+        assert_eq!(exception["type"], "TrackExceptionEvent");
+        assert_eq!(exception["guildId"], "123456");
+        assert_eq!(exception["track"]["encoded"], encoded);
+        assert_eq!(exception["exception"]["message"], "decoder failed");
+        assert_eq!(exception["exception"]["severity"], "fault");
+        assert_eq!(exception["exception"]["cause"], "AudioDecodeError");
+
+        publish_websocket_closed(
+            &state,
+            "session",
+            "123456",
+            VoiceWebSocketCloseInfo {
+                code: 4000,
+                reason: "voice gateway reconnect".into(),
+                by_remote: true,
+            },
+        );
+        let (_, closed) = receiver.try_recv().unwrap();
+        let closed = serde_json::to_value(closed).unwrap();
+        assert_eq!(closed["type"], "WebSocketClosedEvent");
+        assert_eq!(closed["guildId"], "123456");
+        assert_eq!(closed["code"], 4000);
+        assert_eq!(closed["reason"], "voice gateway reconnect");
+        assert_eq!(closed["byRemote"], true);
     }
 
     fn encoded_api_test_track() -> String {
