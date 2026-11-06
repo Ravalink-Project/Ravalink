@@ -97,6 +97,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-rc.') }}
+          overwrite_files: true
           files: |
             dist/ravalink-linux-x86_64
             dist/ravalink-linux-aarch64
