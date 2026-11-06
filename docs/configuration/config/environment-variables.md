@@ -24,13 +24,14 @@ RavaLink environment variables use the RAVALINK_ prefix. They override values lo
 | RAVALINK_PLUGINS_DIRECTORY | Directory used to discover community plugin manifests |
 | RAVALINK_YOUTUBE_COOKIES_FILE | Optional Netscape-format YouTube browser cookies file |
 | RAVALINK_YOUTUBE_OAUTH_CLIENT_ID | Google OAuth client ID for Device Flow |
+| RAVALINK_YOUTUBE_OAUTH_CLIENT_SECRET | Google OAuth client secret for Device Flow; keep it private |
 | RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE | Private path used to persist OAuth access/refresh tokens |
 | RAVALINK_METRICS_PROMETHEUS_ENABLED | Enable the Prometheus endpoint |
 | RAVALINK_METRICS_PROMETHEUS_ENDPOINT | Prometheus endpoint path |
 
 Provider integrations also read provider-specific environment variables:
 
-- YouTube extraction is built in and uses multiple native InnerTube clients with local player-script signature deciphering. Optional browser cookies enable authenticated requests; Google OAuth Device Flow can also provide a renewable Bearer token. Configure both OAuth variables together. On first startup, complete the URL/code printed in the server logs. The refresh token is stored with restrictive file permissions and refreshed automatically. No public Invidious instance is required.
+- YouTube extraction is built in and uses multiple native InnerTube clients with local player-script signature deciphering. Optional browser cookies enable authenticated requests; Google OAuth Device Flow can also provide a renewable Bearer token. Configure all three OAuth variables together: client ID, client secret and token file. On first startup, complete the URL/code printed in the server logs. The refresh token is stored with restrictive file permissions and refreshed automatically. No public Invidious instance is required.
 - RAVALINK_SPOTIFY_CLIENT_ID
 - RAVALINK_SPOTIFY_CLIENT_SECRET
 - RAVALINK_APPLE_MUSIC_TOKEN
