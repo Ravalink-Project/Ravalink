@@ -5,16 +5,16 @@ This file is the acceptance ledger for the native rewrite. A route marked
 
 | Area | Required behavior | Current state |
 |---|---|---|
-| Authentication | Authorization header on REST and WebSocket | Initial implementation |
-| Version | GET /version | Initial implementation |
-| Server info | GET /v4/info with Lavalink v4 field names | Initial implementation; advertises implemented DSP filters |
+| Authentication | Authorization header on REST and WebSocket | Implemented; missing and invalid REST credentials plus required WebSocket handshake headers are covered by contract tests |
+| Version | GET /version | Implemented; exact Lavalink v4 version string is asserted by the release smoke test |
+| Server info | GET /v4/info with Lavalink v4 field names | Implemented; required Lavalink v4 fields and advertised DSP filters are asserted by the release smoke test |
 | REST errors | Lavalink error response shape and optional `trace=true` stack trace | Standard error fields and the optional `trace=true` backtrace field are implemented and covered by server tests and the release smoke test |
 | Statistics | GET /v4/stats | System and process CPU loads are measured through sysinfo; node stats are cached for five seconds; frame stats are omitted when unavailable |
 | Load tracks | GET /v4/loadtracks | Direct HTTP(S) files plus built-in YouTube, Spotify, Apple Music and Deezer resolution/search; YouTube audio matching supplies playable streams for protected catalog providers; direct HTTP(S) sources and plugin stream URLs are opened at player start and decoded progressively through bounded queues; generic URL duration is unknown |
 | Decode track | GET /v4/decodetrack | Lavaplayer track-info v1-v3 decoding; known built-in source payloads supported |
 | Decode tracks | POST /v4/decodetracks | Batch decode using the same codec |
-| WebSocket | Required Authorization, User-Id and Client-Name headers; optional Session-Id resume; ready, stats, player updates and track events | Required Client-Name validation, handshake, session resumption, periodic stats and player-position updates are implemented; TrackStart and TrackEnd (finished, replaced, stopped, cleanup) carry full Track objects and are emitted by the native player lifecycle; TrackException carries the active Track and is emitted for native audio decoding and packet-encoding failures; TrackStuck is emitted once after 10 seconds without playback-position progress and resets when playback resumes; gateway heartbeats are monitored for missing acknowledgements (two heartbeat intervals); reconnect retries session resume with cancellable exponential backoff capped at 30 seconds and a 15-second connect/handshake deadline; multi-client edge cases and live Discord acceptance still need parity tests |
-| Session update | PATCH /v4/sessions/{sessionId} | Initial implementation |
+| WebSocket | Required Authorization, User-Id and Client-Name headers; optional Session-Id resume; ready, stats, player updates and track events | Required Client-Name validation, handshake, session resumption, periodic stats and player-position updates are implemented; TrackStart and TrackEnd (finished, replaced, stopped, cleanup) carry full Track objects and are emitted by the native player lifecycle; TrackException carries the active Track and is emitted for native audio decoding and packet-encoding failures; TrackStuck is emitted once after 10 seconds without playback-position progress and resets when playback resumes; gateway heartbeats are monitored for missing acknowledgements (two heartbeat intervals); reconnect retries session resume with cancellable exponential backoff capped at 30 seconds and a 15-second connect/handshake deadline; session-scoped event delivery and player-update payloads are covered by contract tests; live Discord acceptance remains a post-RC1 test |
+| Session update | PATCH /v4/sessions/{sessionId} | Implemented; effective resume settings and missing-session error serialization are covered by server tests |
 | Route planner | GET /v4/routeplanner/status, POST /free/address, POST /free/all | Disabled-state semantics implemented: status returns 204; free operations return 500 until a native route planner is available |
 | List players | GET /v4/sessions/{sessionId}/players | In-memory player state and per-session/guild native audio-player contexts |
 | Get player | GET /v4/sessions/{sessionId}/players/{guildId} | In-memory player state lookup |
@@ -57,7 +57,8 @@ most 64 KiB before enqueueing. This bounds queued compressed data independently
 of track duration, while the decoder's PCM queue applies downstream backpressure.
 
 The codec reads Lavaplayer track-info versions 1 through 3 and preserves the
-original encoded string. It supports built-in sources whose track payloads are
-known to contain no extra data, plus the HTTP/local probing descriptor. Plugin
-source managers with custom binary payloads are rejected explicitly rather
-than decoded incorrectly.
+original encoded string. Tests include a fixed legacy v1 wire-layout fixture,
+a real v2 Lavaplayer fixture, and a real v3 TrackStart fixture from Twilight.
+All built-in no-extra-data source managers are round-tripped, as are HTTP and
+local probing descriptors. Plugin source managers with custom binary payloads
+are rejected explicitly rather than decoded incorrectly.
