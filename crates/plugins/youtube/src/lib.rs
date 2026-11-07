@@ -603,7 +603,10 @@ async fn load_or_authorize(
             )
         })?;
         if !token.refresh_token.is_empty()
-            && token.scope.split_whitespace().any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
+            && token
+                .scope
+                .split_whitespace()
+                .any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
         {
             if token.created_at.saturating_add(token.expires_in) > unix_time().saturating_add(90) {
                 return Ok(token);
@@ -700,7 +703,11 @@ async fn authorize_device(
             if token.scope.is_empty() {
                 token.scope = YOUTUBE_OAUTH_SCOPE.to_owned();
             }
-            if !token.scope.split_whitespace().any(|scope| scope == YOUTUBE_OAUTH_SCOPE) {
+            if !token
+                .scope
+                .split_whitespace()
+                .any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
+            {
                 return Err(PluginError::new(
                     "youtube",
                     format!("Google granted insufficient YouTube OAuth scopes (received: {}). Revoke RavaLink access in your Google Account and restart the server to authorize the requested scope.", token.scope),
@@ -1004,6 +1011,16 @@ mod tests {
         let serialized = serde_json::to_value(&token).unwrap();
         assert_eq!(serialized["access_token"], "access");
         assert_eq!(serialized["refresh_token"], "refresh");
+    }
+
+    #[test]
+    fn youtube_oauth_requires_full_youtube_scope() {
+        assert!(YOUTUBE_OAUTH_SCOPE
+            .split_whitespace()
+            .any(|scope| scope == YOUTUBE_OAUTH_SCOPE));
+        assert!(!"https://www.googleapis.com/auth/youtube.readonly"
+            .split_whitespace()
+            .any(|scope| scope == YOUTUBE_OAUTH_SCOPE));
     }
 
     #[test]
