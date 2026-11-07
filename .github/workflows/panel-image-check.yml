@@ -1,0 +1,35 @@
+name: Panel image validation
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "Dockerfile.panel"
+      - ".github/workflows/panel-image-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Pelican/Pterodactyl image (no push)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build multi-architecture panel image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.panel
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            RAVALINK_VERSION=v1.0.0-rc.1.2

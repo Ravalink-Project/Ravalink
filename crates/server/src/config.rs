@@ -120,12 +120,24 @@ impl Default for AudioConfig {
 pub struct YouTubeConfig {
     /// Netscape-format browser cookies.txt. Treat this file as a password.
     pub cookies_file: Option<PathBuf>,
-    /// Google OAuth client ID (use an OAuth client configured for TVs and limited-input devices).
-    pub oauth_client_id: Option<String>,
-    /// Google OAuth client secret for the Device Flow; protect it like a password.
-    pub oauth_client_secret: Option<String>,
-    /// File used to persist OAuth access and refresh tokens; protect it like a password.
-    pub oauth_token_file: Option<PathBuf>,
+    /// Lavalink-compatible YouTube TV OAuth configuration.
+    pub oauth: YouTubeOAuthConfig,
+}
+
+/// YouTube TV device-flow OAuth settings. No Google API key or user-created
+/// OAuth client credentials are required.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct YouTubeOAuthConfig {
+    /// Enable YouTube's built-in TV OAuth device flow.
+    pub enabled: bool,
+    /// Existing YouTube refresh token. If omitted, an interactive device flow
+    /// is started and the resulting token is persisted locally.
+    pub refresh_token: Option<String>,
+    /// Path to the persisted token file. Defaults to data/youtube-oauth.json.
+    pub token_file: Option<PathBuf>,
+    /// Skip the interactive device flow when no refresh token is available.
+    pub skip_initialization: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -213,17 +225,12 @@ impl Config {
         if let Ok(value) = env::var("RAVALINK_PLUGINS_DIRECTORY") {
             config.plugin_directory = PathBuf::from(value);
         }
-        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_CLIENT_ID") {
-            let value = value.trim();
-            config.youtube.oauth_client_id = if value.is_empty() {
-                None
-            } else {
-                Some(value.to_owned())
-            };
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_ENABLED") {
+            config.youtube.oauth.enabled = parse_env("RAVALINK_YOUTUBE_OAUTH_ENABLED", &value)?;
         }
-        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_CLIENT_SECRET") {
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_REFRESH_TOKEN") {
             let value = value.trim();
-            config.youtube.oauth_client_secret = if value.is_empty() {
+            config.youtube.oauth.refresh_token = if value.is_empty() {
                 None
             } else {
                 Some(value.to_owned())
@@ -231,22 +238,15 @@ impl Config {
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE") {
             let value = value.trim();
-            config.youtube.oauth_token_file = if value.is_empty() {
+            config.youtube.oauth.token_file = if value.is_empty() {
                 None
             } else {
                 Some(PathBuf::from(value))
             };
         }
-        let oauth_fields = [
-            config.youtube.oauth_client_id.is_some(),
-            config.youtube.oauth_client_secret.is_some(),
-            config.youtube.oauth_token_file.is_some(),
-        ];
-        if oauth_fields.iter().any(|value| *value) && !oauth_fields.iter().all(|value| *value) {
-            return Err(
-                "youtube.oauth_client_id, youtube.oauth_client_secret and youtube.oauth_token_file must be configured together"
-                    .to_owned(),
-            );
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_SKIP_INITIALIZATION") {
+            config.youtube.oauth.skip_initialization =
+                parse_env("RAVALINK_YOUTUBE_OAUTH_SKIP_INITIALIZATION", &value)?;
         }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_COOKIES_FILE") {
             let value = value.trim();
@@ -424,8 +424,34 @@ mod tests {
         );
         let default: Config = toml::from_str("").unwrap();
         assert_eq!(default.youtube.cookies_file, None);
-        assert_eq!(default.youtube.oauth_client_id, None);
-        assert_eq!(default.youtube.oauth_token_file, None);
+        assert!(!default.youtube.oauth.enabled);
+        assert_eq!(default.youtube.oauth.refresh_token, None);
+        assert_eq!(default.youtube.oauth.token_file, None);
+    }
+
+    #[test]
+    fn youtube_oauth_matches_lavalink_device_flow_configuration() {
+        let config: Config = toml::from_str(
+            r#"
+                [youtube.oauth]
+                enabled = true
+                refresh_token = "existing-refresh-token"
+                token_file = "/run/secrets/youtube-oauth.json"
+                skip_initialization = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.youtube.oauth.enabled);
+        assert_eq!(
+            config.youtube.oauth.refresh_token.as_deref(),
+            Some("existing-refresh-token")
+        );
+        assert_eq!(
+            config.youtube.oauth.token_file,
+            Some(PathBuf::from("/run/secrets/youtube-oauth.json"))
+        );
+        assert!(config.youtube.oauth.skip_initialization);
     }
 
     #[test]

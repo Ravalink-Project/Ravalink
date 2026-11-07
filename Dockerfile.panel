@@ -18,7 +18,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl passwd tini bash \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 container \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash container
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash container \
+    && mkdir -p /data \
+    && chown container:container /data
 
 RUN set -eux; \
     test -n "${RAVALINK_VERSION}"; \
@@ -62,6 +64,10 @@ RUN chmod 0755 /entrypoint.sh
 ENV USER=container HOME=/home/container
 WORKDIR /home/container
 USER container
+
+# Keep the OAuth refresh token outside the ephemeral application directory.
+# Pelican/Pterodactyl's Docker runtime can mount this path as persistent storage.
+VOLUME ["/data"]
 
 ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
 CMD ["/entrypoint.sh"]

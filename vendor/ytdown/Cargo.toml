@@ -1,0 +1,50 @@
+[package]
+name = "ytdown"
+version = "0.8.1"
+edition = "2021"
+description = "A Rust library mirroring yt-dlp's core: extract, select, and download media. Ships with a companion CLI (ytdown-cli)."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/4thel00z/ytdown"
+keywords = ["youtube", "download", "media", "yt-dlp"]
+categories = ["multimedia", "api-bindings"]
+# The Python bindings (ytdown-py) are a separate, unpublished maturin crate.
+exclude = ["ytdown-py", "ytdown-wasm"]
+
+[features]
+default = ["native-tls"]
+ffmpeg = []
+# TLS backend for the default HTTP client. Platform TLS is the default because
+# some sites (Reddit) blocklist the rustls ClientHello fingerprint and answer
+# 403 to every request made through it. On Linux this links against the system
+# OpenSSL, so `libssl-dev`/`openssl-devel` must be present at build time; use
+# `native-tls-vendored` to compile OpenSSL from source instead (needed inside
+# manylinux containers, which ship no OpenSSL headers).
+native-tls = ["reqwest/native-tls"]
+native-tls-vendored = ["reqwest/native-tls-vendored"]
+# Opt into rustls instead (no OpenSSL dependency, but see the caveat above).
+rustls-tls = ["reqwest/rustls-tls"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+futures = "0.3"
+async-trait = "0.1"
+url = "2"
+boa_engine = "0.20"
+regex = "1"
+tracing = "0.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "stream", "cookies"] }
+sha1 = "0.10"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", features = ["sync", "macros"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["full", "test-util"] }
+tempfile = "3"
