@@ -608,9 +608,7 @@ async fn load_or_authorize(
                 format!("invalid OAuth token file {}: {error}", path.display()),
             )
         })?;
-        if !token.refresh_token.is_empty()
-            && has_required_youtube_scope(&token.scope)
-        {
+        if !token.refresh_token.is_empty() && has_required_youtube_scope(&token.scope) {
             if token.created_at.saturating_add(token.expires_in) > unix_time().saturating_add(90) {
                 return Ok(token);
             }
@@ -706,8 +704,7 @@ async fn authorize_device(
             if token.scope.is_empty() {
                 token.scope = YOUTUBE_OAUTH_SCOPE.to_owned();
             }
-            if !has_required_youtube_scope(&token.scope)
-            {
+            if !has_required_youtube_scope(&token.scope) {
                 return Err(PluginError::new(
                     "youtube",
                     format!("Google granted insufficient YouTube OAuth scopes (received: {}). Revoke RavaLink access in your Google Account and restart the server to authorize the requested scope.", token.scope),
