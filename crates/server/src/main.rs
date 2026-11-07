@@ -296,6 +296,7 @@ async fn built_in_plugins(
     let youtube_plugin = YouTubePlugin::new(
         youtube.cookies_file.as_deref(),
         youtube.oauth_client_id.as_deref(),
+        youtube.oauth_client_secret.as_deref(),
         youtube.oauth_token_file.as_deref(),
     )
     .await

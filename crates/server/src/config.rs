@@ -122,7 +122,9 @@ pub struct YouTubeConfig {
     pub cookies_file: Option<PathBuf>,
     /// Google OAuth client ID (use an OAuth client configured for TVs and limited-input devices).
     pub oauth_client_id: Option<String>,
-    /// File used to persist the OAuth refresh token; protect it like a password.
+    /// Google OAuth client secret for the Device Flow; protect it like a password.
+    pub oauth_client_secret: Option<String>,
+    /// File used to persist OAuth access and refresh tokens; protect it like a password.
     pub oauth_token_file: Option<PathBuf>,
 }
 
@@ -219,6 +221,14 @@ impl Config {
                 Some(value.to_owned())
             };
         }
+        if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_CLIENT_SECRET") {
+            let value = value.trim();
+            config.youtube.oauth_client_secret = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_owned())
+            };
+        }
         if let Ok(value) = env::var("RAVALINK_YOUTUBE_OAUTH_TOKEN_FILE") {
             let value = value.trim();
             config.youtube.oauth_token_file = if value.is_empty() {
@@ -227,9 +237,14 @@ impl Config {
                 Some(PathBuf::from(value))
             };
         }
-        if config.youtube.oauth_client_id.is_some() != config.youtube.oauth_token_file.is_some() {
+        let oauth_fields = [
+            config.youtube.oauth_client_id.is_some(),
+            config.youtube.oauth_client_secret.is_some(),
+            config.youtube.oauth_token_file.is_some(),
+        ];
+        if oauth_fields.iter().any(|value| *value) && !oauth_fields.iter().all(|value| *value) {
             return Err(
-                "youtube.oauth_client_id and youtube.oauth_token_file must be configured together"
+                "youtube.oauth_client_id, youtube.oauth_client_secret and youtube.oauth_token_file must be configured together"
                     .to_owned(),
             );
         }

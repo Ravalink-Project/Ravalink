@@ -32,6 +32,7 @@ max_active_decoded_pcm_bytes = 268435456
 # On first start, RavaLink prints a verification URL and code in its logs.
 # Keep the token file private; it contains a long-lived refresh token.
 # oauth_client_id = "YOUR_GOOGLE_OAUTH_CLIENT_ID"
+# oauth_client_secret = "YOUR_GOOGLE_OAUTH_CLIENT_SECRET"
 # oauth_token_file = "/home/container/config/youtube-oauth-token.json"
 
 [metrics]
