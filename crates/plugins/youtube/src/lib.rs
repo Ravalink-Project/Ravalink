@@ -707,7 +707,10 @@ async fn authorize_device(
             if !has_required_youtube_scope(&token.scope) {
                 return Err(PluginError::new(
                     "youtube",
-                    format!("Google granted insufficient YouTube OAuth scopes (received: {}). Revoke RavaLink access in your Google Account and restart the server to authorize the requested scope.", token.scope),
+                    format!(
+                        "Google granted insufficient YouTube OAuth scopes (received: {}). Revoke RavaLink access in your Google Account and restart the server to authorize the requested scope.",
+                        token.scope
+                    ),
                 ));
             }
             token.created_at = unix_time();
