@@ -21,6 +21,7 @@ use std::{
 use tokio::sync::RwLock;
 use ytdown::{MediaInfo, Ytdown, cookies::CookieJar};
 
+const YOUTUBE_OAUTH_SCOPE: &str = "https://www.googleapis.com/auth/youtube";
 const MAX_SEARCH_RESULTS: usize = 50;
 const MAX_PLAYLIST_TRACKS: usize = 500;
 const MAX_SEARCH_QUERY_BYTES: usize = 512;
@@ -99,6 +100,9 @@ impl YouTubePlugin {
                         Ok(mut refreshed) => {
                             if refreshed.refresh_token.is_empty() {
                                 refreshed.refresh_token = current.refresh_token.clone();
+                            }
+                            if refreshed.scope.is_empty() {
+                                refreshed.scope = current.scope.clone();
                             }
                             refreshed.created_at = unix_time();
                             if let Err(error) = save_token(&token_file, &refreshed) {
@@ -500,6 +504,9 @@ struct OAuthToken {
     expires_in: u64,
     #[serde(default)]
     created_at: u64,
+    /// OAuth scopes granted by Google for this refresh token.
+    #[serde(default)]
+    scope: String,
 }
 fn default_bearer() -> String {
     "Bearer".into()
@@ -595,7 +602,9 @@ async fn load_or_authorize(
                 format!("invalid OAuth token file {}: {error}", path.display()),
             )
         })?;
-        if !token.refresh_token.is_empty() {
+        if !token.refresh_token.is_empty()
+            && token.scope.split_whitespace().any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
+        {
             if token.created_at.saturating_add(token.expires_in) > unix_time().saturating_add(90) {
                 return Ok(token);
             }
@@ -610,7 +619,10 @@ async fn load_or_authorize(
                         )
                     })?;
             if refreshed.refresh_token.is_empty() {
-                refreshed.refresh_token = token.refresh_token;
+                refreshed.refresh_token = token.refresh_token.clone();
+            }
+            if refreshed.scope.is_empty() {
+                refreshed.scope = token.scope;
             }
             refreshed.created_at = unix_time();
             save_token(path, &refreshed)?;
@@ -630,7 +642,7 @@ async fn authorize_device(
         .post("https://oauth2.googleapis.com/device/code")
         .form(&[
             ("client_id", client_id),
-            ("scope", "https://www.googleapis.com/auth/youtube.readonly"),
+            ("scope", YOUTUBE_OAUTH_SCOPE),
         ])
         .send()
         .await
@@ -685,6 +697,15 @@ async fn authorize_device(
             let mut token: OAuthToken = response.json().await.map_err(|error| {
                 PluginError::new("youtube", format!("invalid OAuth token response: {error}"))
             })?;
+            if token.scope.is_empty() {
+                token.scope = YOUTUBE_OAUTH_SCOPE.to_owned();
+            }
+            if !token.scope.split_whitespace().any(|scope| scope == YOUTUBE_OAUTH_SCOPE) {
+                return Err(PluginError::new(
+                    "youtube",
+                    format!("Google granted insufficient YouTube OAuth scopes (received: {}). Revoke RavaLink access in your Google Account and restart the server to authorize the requested scope.", token.scope),
+                ));
+            }
             token.created_at = unix_time();
             save_token(token_path, &token)?;
             return Ok(token);
