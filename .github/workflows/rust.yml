@@ -23,8 +23,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Format vendored ytdown
+        run: cargo fmt --manifest-path vendor/ytdown/Cargo.toml --all -- --check
       - name: Test
         run: cargo test --workspace --all-targets
+      - name: Test vendored YouTube TV OAuth request scoping
+        run: cargo test --manifest-path vendor/ytdown/Cargo.toml --lib oauth_header_is_only_added_to_tv_player_requests --no-default-features --features rustls-tls
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: RC1 readiness checklist

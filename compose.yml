@@ -12,3 +12,7 @@ services:
       - "127.0.0.1:2333:2333"
     volumes:
       - ./ravalink.toml:/etc/ravalink/ravalink.toml:ro
+      - ravalink-data:/data
+
+volumes:
+  ravalink-data:

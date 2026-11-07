@@ -13,5 +13,6 @@ serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 tokio.workspace = true
-ytdown = { version = "0.8.1", default-features = false, features = ["native-tls-vendored"] }
+ytdown = { path = "../../../vendor/ytdown", default-features = false, features = ["native-tls-vendored"] }
