@@ -508,6 +508,12 @@ struct OAuthToken {
     #[serde(default)]
     scope: String,
 }
+fn has_required_youtube_scope(scopes: &str) -> bool {
+    scopes
+        .split_whitespace()
+        .any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
+}
+
 fn default_bearer() -> String {
     "Bearer".into()
 }
@@ -603,10 +609,7 @@ async fn load_or_authorize(
             )
         })?;
         if !token.refresh_token.is_empty()
-            && token
-                .scope
-                .split_whitespace()
-                .any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
+            && has_required_youtube_scope(&token.scope)
         {
             if token.created_at.saturating_add(token.expires_in) > unix_time().saturating_add(90) {
                 return Ok(token);
@@ -703,10 +706,7 @@ async fn authorize_device(
             if token.scope.is_empty() {
                 token.scope = YOUTUBE_OAUTH_SCOPE.to_owned();
             }
-            if !token
-                .scope
-                .split_whitespace()
-                .any(|scope| scope == YOUTUBE_OAUTH_SCOPE)
+            if !has_required_youtube_scope(&token.scope)
             {
                 return Err(PluginError::new(
                     "youtube",
@@ -1015,12 +1015,13 @@ mod tests {
 
     #[test]
     fn youtube_oauth_requires_full_youtube_scope() {
-        assert!(YOUTUBE_OAUTH_SCOPE
-            .split_whitespace()
-            .any(|scope| scope == YOUTUBE_OAUTH_SCOPE));
-        assert!(!"https://www.googleapis.com/auth/youtube.readonly"
-            .split_whitespace()
-            .any(|scope| scope == YOUTUBE_OAUTH_SCOPE));
+        assert!(has_required_youtube_scope(YOUTUBE_OAUTH_SCOPE));
+        assert!(has_required_youtube_scope(&format!(
+            "openid profile {YOUTUBE_OAUTH_SCOPE}"
+        )));
+        assert!(!has_required_youtube_scope(
+            "https://www.googleapis.com/auth/youtube.readonly"
+        ));
     }
 
     #[test]
