@@ -644,10 +644,7 @@ async fn authorize_device(
     let http = reqwest::Client::new();
     let device: DeviceCodeResponse = http
         .post("https://oauth2.googleapis.com/device/code")
-        .form(&[
-            ("client_id", client_id),
-            ("scope", YOUTUBE_OAUTH_SCOPE),
-        ])
+        .form(&[("client_id", client_id), ("scope", YOUTUBE_OAUTH_SCOPE)])
         .send()
         .await
         .map_err(|error| {
